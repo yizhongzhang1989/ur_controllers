@@ -11,6 +11,15 @@ must pass on both `ur5e` and `ur15`. Real UR15 is explicitly out of scope.
 
 ## Last completed tasks
 
+- `scripts/auto_dev_loop.sh` now invokes the GitHub Copilot CLI with
+  `--allow-all-tools -p` (previous default passed the prompt positionally
+  and failed with "Invalid command format").
+- `tests/integration/test_sim_smoke.py::_controllers_active` now strips
+  ANSI colour escapes and sets `NO_COLOR=1` on the `ros2 control
+  list_controllers` call. The humble CLI colourises its output, which
+  broke the whitespace-sensitive `" active"` substring match and caused
+  the smoke test to fail on both arms. Both `ur5e` and `ur15` now pass
+  `scripts/run_tests.sh` (~25 s).
 - Submodules pulled in and colcon-built (`cartesian_controllers`,
   `crisp_controllers`, `ur_sim_config`, `ur_simulation_gz`). See build
   status below.
