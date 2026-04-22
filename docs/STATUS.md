@@ -1,6 +1,6 @@
 # Status
 
-_Last updated: 2026-04-22 (M2 kickoff: crisp controllers reference doc)._
+_Last updated: 2026-04-22 (M2 kickoff: crisp controllers reference doc; sim-bringup spawner race fixed)._
 
 ## Current milestone
 
@@ -14,6 +14,16 @@ explicitly out of scope.
 
 ## Last completed tasks
 
+- `ur_sim_mujoco.launch.py` (submodule `third_party/ur_simulator`,
+  `auto_dev` branch): serialise controller spawners. JSB spawner runs
+  first alone; the other five chain off its `OnProcessExit`. Adds
+  `--service-call-timeout 30` to every spawner. Fixes a Humble + FastRTPS
+  race where concurrent spawners overflowed the RMW response queue,
+  dropping `joint_state_broadcaster`'s `load_controller` reply → retry
+  hit "already loaded" → FATAL → `/joint_states` never published. See
+  ADR-0006. `scripts/run_tests.sh` now green on both `ur5e` and `ur15`
+  (~25 s). Parent-repo pointer bump commit chained on the submodule
+  commit.
 - `docs/crisp_controllers.md` added: enumerates the plugin classes exported
   by `third_party/crisp_controllers`, clarifies that the "three impedance
   controllers" are three configuration roles of the same
@@ -85,9 +95,9 @@ the shared topic API (`target_pose`, `target_joint`, `target_wrench`).
 - `scripts/run_tests.sh` runs unit → colcon test → integration.
 - Integration stage sources `/opt/ros/humble/setup.bash` and `install/setup.bash`
   before pytest.
-- `test_sim_smoke.py` last validated manually: sim, rosbridge, and dashboard
-  came up on ur5e. Full two-arm pytest run still to be re-confirmed after
-  the final patches (bumped timeouts, inline joint-name parsing).
+- `test_sim_smoke.py` validated via `scripts/run_tests.sh`: both `ur5e`
+  and `ur15` pass (2 passed in ~25 s) after the spawner-serialisation
+  fix in `ur_sim_mujoco.launch.py` (ADR-0006).
 
 ## Blockers / open questions for operator
 

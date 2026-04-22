@@ -118,3 +118,33 @@ Format: ADR-lite. Do not delete past entries; supersede with a new one.
   and usable as ros2_control plugins, just not via that package's own
   simulation node. Our evaluation scenarios drive them through
   `ur_simulator` like every other controller.
+
+---
+
+## ADR-0006 — Serialise controller spawners in MuJoCo sim launch
+
+- **Date:** 2026-04-22
+- **Status:** Accepted
+- **Context:** `third_party/ur_simulator/src/ur_sim_config/launch/ur_sim_mujoco.launch.py`
+  fired all six `controller_manager/spawner` processes concurrently at
+  startup. On Humble + the default FastRTPS RMW this overflows the
+  RMW response queue under peak load: the controller manager's reply
+  to one spawner's `load_controller` call is silently dropped, the
+  spawner retries the call 10 s later, and Humble's `load_controller`
+  is **not** idempotent — the second attempt returns
+  `A controller named X was already loaded`, causing the spawner to
+  exit FATAL and leaving its controller un-activated. When the victim
+  was `joint_state_broadcaster`, `/joint_states` never published and
+  `tests/integration/test_sim_smoke.py::test_sim_bringup[ur5e]` failed.
+  `ur15` happened to race luckier and usually passed; the bug was a
+  startup-ordering race, not a per-arm issue.
+- **Decision:** In `ur_sim_mujoco.launch.py`:
+  1. Start `joint_state_broadcaster_spawner` alone first.
+  2. Chain the other five controller spawners off its `OnProcessExit`,
+     so at most one spawner is ever talking to the controller manager.
+  3. Add `--service-call-timeout 30` to every spawner as defence in
+     depth against slow responses.
+- **Consequences:** Sim bringup is ~1–2 s slower (spawners now run
+  sequentially instead of in parallel) but deterministic on both arms
+  and every RMW. The fix lives on `third_party/ur_simulator`'s
+  `auto_dev` branch; parent repo bumps the submodule pointer.
