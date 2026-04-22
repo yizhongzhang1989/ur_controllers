@@ -27,3 +27,8 @@ evaluation/reports/
 
 # Agent loop control
 .STOP
+
+# Local secrets (never commit)
+.env
+.env.*
+!.env.example

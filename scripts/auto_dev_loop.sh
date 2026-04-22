@@ -31,6 +31,29 @@ set -u
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
+# Load local secrets (e.g. SUDO_PASSWORD) if present. Never committed.
+if [[ -f "$REPO_ROOT/.env" ]]; then
+    set -a
+    # shellcheck disable=SC1091
+    source "$REPO_ROOT/.env"
+    set +a
+fi
+
+# If SUDO_PASSWORD is set, export a SUDO_ASKPASS helper so `sudo -A <cmd>`
+# works non-interactively from inside an iteration. Scripts still prefer
+# passwordless sudoers entries; this is a fallback only.
+if [[ -n "${SUDO_PASSWORD:-}" ]]; then
+    ASKPASS_SCRIPT="$REPO_ROOT/.auto_dev_logs/askpass.sh"
+    mkdir -p "$(dirname "$ASKPASS_SCRIPT")"
+    cat > "$ASKPASS_SCRIPT" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$SUDO_PASSWORD"
+EOF
+    chmod 700 "$ASKPASS_SCRIPT"
+    export SUDO_ASKPASS="$ASKPASS_SCRIPT"
+    export SUDO_PASSWORD
+fi
+
 MAX_ITERS="${MAX_ITERS:-100}"
 COPILOT_CMD="${COPILOT_CMD:-copilot}"   # override if your CLI differs
 AUTO_PUSH="${AUTO_PUSH:-1}"             # set to 0 to disable auto push
