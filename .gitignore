@@ -1,0 +1,29 @@
+# Build artefacts
+build/
+install/
+log/
+.auto_dev_logs/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# ROS / colcon
+COLCON_IGNORE
+
+# Evaluation outputs (keep scenario specs, drop large outputs)
+evaluation/baselines/*.bag
+evaluation/baselines/*.mcap
+evaluation/reports/
+
+# Agent loop control
+.STOP
