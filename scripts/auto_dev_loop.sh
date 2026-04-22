@@ -55,7 +55,9 @@ EOF
 fi
 
 MAX_ITERS="${MAX_ITERS:-100}"
-COPILOT_CMD="${COPILOT_CMD:-copilot}"   # override if your CLI differs
+# Default: GitHub Copilot CLI in non-interactive mode with all tools allowed.
+# The prompt is appended as the last arg, so the command must end with `-p`.
+COPILOT_CMD="${COPILOT_CMD:-copilot --allow-all-tools -p}"
 AUTO_PUSH="${AUTO_PUSH:-1}"             # set to 0 to disable auto push
 LOG_DIR="$REPO_ROOT/.auto_dev_logs"
 mkdir -p "$LOG_DIR"
