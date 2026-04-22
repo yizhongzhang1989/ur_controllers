@@ -10,13 +10,20 @@
 #
 # Stop conditions:
 #   - `.STOP` file at repo root.
-#   - MAX_ITERS reached (default 20, override via env).
+#   - MAX_ITERS reached (default 100, override via env).
 #   - Two consecutive iterations with no new commit.
 #   - All ROADMAP milestones checked off.
+#
+# Pushing:
+#   After every iteration that produces a new commit, the loop pushes the
+#   current branch to `origin` (non-force). Disable with `AUTO_PUSH=0`. The
+#   push happens AFTER the test gate, so red commits never leave the local
+#   machine.
 #
 # Usage:
 #   scripts/auto_dev_loop.sh                 # default config
 #   MAX_ITERS=5 scripts/auto_dev_loop.sh     # cap iterations
+#   AUTO_PUSH=0 scripts/auto_dev_loop.sh     # local-only, do not push
 #   COPILOT_CMD="copilot -p" scripts/auto_dev_loop.sh   # override agent cmd
 
 set -u
@@ -24,10 +31,13 @@ set -u
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
-MAX_ITERS="${MAX_ITERS:-20}"
+MAX_ITERS="${MAX_ITERS:-100}"
 COPILOT_CMD="${COPILOT_CMD:-copilot}"   # override if your CLI differs
+AUTO_PUSH="${AUTO_PUSH:-1}"             # set to 0 to disable auto push
 LOG_DIR="$REPO_ROOT/.auto_dev_logs"
 mkdir -p "$LOG_DIR"
+
+current_branch() { git rev-parse --abbrev-ref HEAD 2>/dev/null || echo HEAD; }
 
 log() { printf '[auto_dev_loop] %s\n' "$*" | tee -a "$LOG_DIR/loop.log"; }
 
@@ -70,7 +80,10 @@ Steps you MUST take this iteration:
    needs a submodule bump), do NOT guess. Update docs/STATUS.md with a
    clear blocker entry, commit only the STATUS update, and stop.
 
-Do not modify files under third_party/. Do not push. Do not weaken tests.
+Do not modify files under third_party/ (except the ur_simulator submodule
+on its auto_dev branch; see AGENTS.md). Do not weaken tests. The outer
+loop will push for you after the test gate — do not push from inside your
+iteration.
 EOF
 )
 
@@ -91,7 +104,7 @@ EOF
         fi
     fi
 
-    # 5. Progress check.
+    # 5. Progress check + push.
     new_head="$(git rev-parse HEAD)"
     if [[ "$new_head" == "$prev_head" ]]; then
         no_progress_streak=$((no_progress_streak + 1))
@@ -103,6 +116,18 @@ EOF
     else
         no_progress_streak=0
         log "new commit: $(git log -1 --oneline)"
+
+        # Push the branch to origin after every green iteration. Never
+        # force-push; if the push is rejected the loop stops so a human
+        # can resolve the divergence.
+        if (( AUTO_PUSH == 1 )) && git remote get-url origin >/dev/null 2>&1; then
+            branch="$(current_branch)"
+            log "pushing $branch to origin"
+            if ! git push origin "$branch" 2>&1 | tee -a "$LOG_DIR/push_$i.log"; then
+                log "stop: git push failed (see $LOG_DIR/push_$i.log); resolve manually"
+                break
+            fi
+        fi
     fi
     prev_head="$new_head"
 done

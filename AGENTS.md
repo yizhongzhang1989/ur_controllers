@@ -47,6 +47,10 @@ Every agent invocation must:
    next, any blockers).
 7. If a non-trivial architectural choice was made, append an entry to
    `docs/DECISIONS.md`.
+8. **Do not `git push` from inside an iteration.** The outer
+   `scripts/auto_dev_loop.sh` pushes the current branch to `origin` after
+   the test gate passes. If you are running the agent without the loop,
+   the operator will push manually.
 
 If tests fail, the iteration must fix them before committing. Never commit a
 red tree.
@@ -77,9 +81,15 @@ red tree.
 
 ## 6. Forbidden actions
 
-- `git push --force`, `git reset --hard` on shared branches, amending pushed
-  commits.
-- Modifying files under `third_party/` (other than the submodule pointer).
+- `git push --force`, `git push --force-with-lease`, `git reset --hard` on
+  shared branches, amending or rebasing commits that have already been
+  pushed.
+- Pushing from inside an iteration. The outer loop handles pushes.
+- Modifying files under `third_party/crisp_controllers/` or
+  `third_party/cartesian_controllers/`. These are read-only mirrors of
+  upstream.
+- Committing on the wrong branch inside `third_party/ur_simulator/`. All
+  edits there must land on `auto_dev`; `main` is upstream and off-limits.
 - Disabling, skipping, or deleting failing tests to get green.
 - Running any launch file that connects to the real UR15 autonomously.
   Real-robot launches require explicit human confirmation for that iteration.
@@ -103,5 +113,7 @@ The `scripts/auto_dev_loop.sh` loop terminates when any of:
 
 - `.STOP` file exists at the repo root.
 - All ROADMAP milestones are marked `[x]`.
-- The configured max-iterations count is reached.
+- The configured max-iterations count is reached (default 100).
 - Two consecutive iterations produce no commit (no-progress guard).
+- `git push` fails (typically because the remote has diverged). The loop
+  stops instead of trying to force or rebase; a human resolves.
