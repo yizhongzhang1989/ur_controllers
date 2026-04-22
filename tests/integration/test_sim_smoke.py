@@ -22,6 +22,7 @@ Invoke: ``pytest -q tests/integration/test_sim_smoke.py``
 from __future__ import annotations
 
 import os
+import re
 import signal
 import socket
 import subprocess
@@ -139,11 +140,17 @@ def _joint_state_fields() -> set[str] | None:
 def _controllers_active() -> set[str]:
     # Use a generous timeout: first call cold-starts ros2cli and has to
     # `wait for service /controller_manager/list_controllers`.
-    cp = _bash("timeout 20 ros2 control list_controllers", timeout=30)
+    # NO_COLOR=1 prevents `ros2 control list_controllers` from wrapping the
+    # controller name/state columns in ANSI colour escapes, which otherwise
+    # break the whitespace-sensitive substring match below.
+    cp = _bash("NO_COLOR=1 timeout 20 ros2 control list_controllers", timeout=30)
     if cp.returncode != 0:
         return set()
     active: set[str] = set()
-    for line in cp.stdout.splitlines():
+    # Defensive: strip any ANSI escape sequences in case NO_COLOR is ignored.
+    ansi_re = re.compile(r"\x1b\[[0-9;]*m")
+    for raw in cp.stdout.splitlines():
+        line = ansi_re.sub("", raw)
         # Humble format: "<name>  <type>  active" (or "inactive").
         # "inactive" does NOT match " active" because there's no space
         # between "in" and "active".
