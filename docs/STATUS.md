@@ -1,16 +1,28 @@
 # Status
 
-_Last updated: 2026-04-22._
+_Last updated: 2026-04-22 (M2 kickoff: crisp controllers reference doc)._
 
 ## Current milestone
 
-**M1 — Simulator brings up UR5e and UR15** (in progress; largely complete).
-Next priority after M1 is M2 (crisp impedance controllers in sim), then M3
-(our own joint impedance), then M4 (cartesian controllers). Every sim task
-must pass on both `ur5e` and `ur15`. Real UR15 is explicitly out of scope.
+**M2 — `crisp_controllers` in sim** (just kicked off). M1 is complete.
+M2 step 1 (docs reference of crisp's controllers) is done; next is the
+first controller role — `joint_impedance_controller` — wired up on ur5e,
+then ur15, with an integration test. Priority order after M2: M3 (our own
+joint impedance), M4 (cartesian controllers), M5 (evaluation harness).
+Every sim task must pass on both `ur5e` and `ur15`. Real UR15 is
+explicitly out of scope.
 
 ## Last completed tasks
 
+- `docs/crisp_controllers.md` added: enumerates the plugin classes exported
+  by `third_party/crisp_controllers`, clarifies that the "three impedance
+  controllers" are three configuration roles of the same
+  `crisp_controllers/CartesianController` plugin (cartesian_impedance,
+  joint_impedance, gravity_compensation), lists required command/state
+  interfaces and topics, and sketches the M2 bring-up pattern we'll follow
+  (per-role YAML + one launch file with `robot` and `mode` args +
+  parametrised integration test). Completes the first unchecked item of
+  M2 in `docs/ROADMAP.md`.
 - `scripts/auto_dev_loop.sh` now invokes the GitHub Copilot CLI with
   `--allow-all-tools -p` (previous default passed the prompt positionally
   and failed with "Invalid command format").
@@ -35,17 +47,24 @@ must pass on both `ur5e` and `ur15`. Real UR15 is explicitly out of scope.
 
 ## Next task (agent should pick this up)
 
-Start **M2**:
+Continue **M2**:
 
-1. Read `third_party/crisp_controllers/README.md` (and any docs under it)
-   to enumerate its three impedance controllers and their required
-   command interfaces + params. Record in `docs/crisp_controllers.md`.
-2. Wire the first impedance controller into a `bringup/launch/` entry
-   that reuses `scripts/launch_sim.sh --control_mode effort` plus a crisp
-   controllers YAML in `bringup/config/`.
-3. Add an integration test under `tests/integration/test_crisp_*.py`
-   parametrised over `{ur5e, ur15}` that sends a small regulation command
-   and asserts bounded tracking error.
+1. Write `bringup/config/crisp_joint_impedance.{ur5e,ur15}.yaml` using the
+   role pattern documented in `docs/crisp_controllers.md` (k_pos_* = 0,
+   nullspace.stiffness > 0, `projector_type: none`). Pick joint order
+   matching the sim's controller_manager.
+2. Add `bringup/launch/crisp_bringup.launch.py` that accepts
+   `robot:={ur5e,ur15}` and `mode:={joint,cartesian,gravity}`; for this
+   iteration wire `mode:=joint` end-to-end. Deactivate
+   `forward_effort_controller` before activating the crisp controller
+   (only one effort commander at a time).
+3. Add `tests/integration/test_crisp_joint_impedance.py` parametrised over
+   `{ur5e, ur15}` that publishes a small `target_joint` regulation command
+   and asserts bounded tracking error on `/joint_states` within a fixed
+   window.
+
+See `docs/crisp_controllers.md` for plugin names, required interfaces, and
+the shared topic API (`target_pose`, `target_joint`, `target_wrench`).
 
 ## Build status
 
