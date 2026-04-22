@@ -26,15 +26,23 @@ Format: ADR-lite. Do not delete past entries; supersede with a new one.
 
 ---
 
-## ADR-0002 — Placeholder: ROS 2 distribution
+## ADR-0002 — ROS 2 distribution: Humble
 
-- **Date:** TBD
-- **Status:** Proposed
-- **Context:** ros2_control APIs and package availability differ between
-  distros. Must be pinned before M1.
-- **Decision:** TBD (candidates: Humble LTS, Jazzy LTS).
-- **Consequences:** CI image, rosdep keys, and driver package versions all
-  follow from this choice.
+- **Date:** 2026-04-22
+- **Status:** Accepted
+- **Context:** `ros2_control` APIs, `ur_simulator` documentation, and all
+  system packages already installed on the dev machine target ROS 2
+  Humble on Ubuntu 22.04. `crisp_controllers` and `cartesian_controllers`
+  build against Humble out of the box. Moving to Jazzy would churn
+  submodules and system packages without delivering a feature we need
+  right now.
+- **Decision:** Pin the workspace to **ROS 2 Humble**. All scripts,
+  launch files, configs, and CI assume `/opt/ros/humble/setup.bash`.
+  Re-evaluate when Humble reaches EOL (May 2027) or when a required
+  feature lands in a newer distro.
+- **Consequences:** Any agent change that assumes a newer distro must
+  supersede this ADR first. `rosdep`, the CI image, and the dev-loop
+  scripts all hard-code Humble.
 ---
 
 ## ADR-0003 — Submodule ownership split
@@ -85,3 +93,28 @@ Format: ADR-lite. Do not delete past entries; supersede with a new one.
     commits inside the submodule plus a pointer-bump commit here.
 - **Consequences:** The agent will not enter M-REAL autonomously. The
   simulator itself is an active work item, not a frozen dependency.
+
+---
+
+## ADR-0005 — Build skip list and simulator choice
+
+- **Date:** 2026-04-22
+- **Status:** Accepted
+- **Context:** `third_party/cartesian_controllers` ships two packages
+  that are not useful for our pipeline:
+  - `cartesian_controller_simulation` requires the MuJoCo C library at
+    `/home/robot/mujoco-3.0.0`, which is not installed system-wide. We
+    already have `ur_simulator` (same MuJoCo backend, better integrated)
+    as our sim.
+  - `cartesian_controller_tests` is a ROS 1 catkin package that colcon
+    cannot build and that exercises a completely different simulator.
+- **Decision:** Always pass
+  `--packages-skip cartesian_controller_simulation cartesian_controller_tests`
+  to `colcon build`. Our sim is `ur_simulator` (MuJoCo via
+  `mujoco_ros2_control`). The skip list lives in README.md,
+  `scripts/launch_sim.sh` assumes `install/setup.bash` produced with that
+  skip list.
+- **Consequences:** Controllers from `cartesian_controllers` are built
+  and usable as ros2_control plugins, just not via that package's own
+  simulation node. Our evaluation scenarios drive them through
+  `ur_simulator` like every other controller.

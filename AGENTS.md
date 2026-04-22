@@ -57,12 +57,15 @@ red tree.
 
 ## 4. Coding standards
 
-- ROS 2 distribution: see `docs/DECISIONS.md` (must be pinned before M1).
+- ROS 2 distribution: **Humble** (Ubuntu 22.04). See ADR-0002 in
+  `docs/DECISIONS.md`.
 - C++17, `ament_cmake`, `ros2_control` plugin conventions.
 - Python: ≥3.10, `ament_python` or plain scripts with type hints.
 - Formatting: `clang-format` (LLVM base) for C++, `ruff format` for Python.
 - Linting: `ament_lint_auto` for C++ packages, `ruff check` for Python.
 - Parameters: prefer `generate_parameter_library` for ros2_control plugins.
+- Build: always pass `--packages-skip cartesian_controller_simulation
+  cartesian_controller_tests` to `colcon build` (see ADR-0005).
 
 ## 5. Testing requirements
 

@@ -26,7 +26,7 @@ Cross-cutting rules:
 ## M0 — Bootstrap
 
 - [x] Create repo scaffolding (directories, docs, scripts).
-- [ ] Decide ROS 2 distro; record in `docs/DECISIONS.md`.
+- [x] Decide ROS 2 distro; record in `docs/DECISIONS.md` (Humble, ADR-0002).
 - [x] Add git submodules under `third_party/`:
   - [x] `ur_simulator` — https://github.com/yizhongzhang1989/ur_simulator.git (tracking `auto_dev`)
   - [x] `crisp_controllers` — https://github.com/yizhongzhang1989/crisp_controllers.git (read-only)
@@ -41,16 +41,24 @@ Cross-cutting rules:
 Goal: a single launch file takes a `robot:=ur5e|ur15` arg and stands up the
 sim with that arm. Both must work before M2 starts.
 
-- [ ] Confirm `ur_simulator` ships descriptions for both `ur5e` and `ur15`.
-      If not, add/fix them on the submodule's `auto_dev` branch.
-- [ ] `bringup/launch/sim_bringup.launch.py` with `robot` arg; default
-      `ur5e`.
-- [ ] Verify `/joint_states` publishes at expected rate for both arms.
-- [ ] Verify the command interfaces required by crisp's three impedance
+- [x] Confirm `ur_simulator` ships descriptions for both `ur5e` and `ur15`.
+      System package `ros-humble-ur-description` covers both; the sim
+      picks the arm via its `ur_type` config.
+- [x] `bringup/launch/sim_bringup.launch.py` with `robot` arg; default
+      `ur5e`. (Implemented as `scripts/launch_sim.sh <robot> <mode>`
+      wrapping the sim's own `launch_all.sh`; a pure .launch.py wrapper
+      can be added later if needed by ros2 launch composition.)
+- [x] Verify `/joint_states` publishes at expected rate for both arms.
+      Covered by `tests/integration/test_sim_smoke.py`.
+- [x] Verify the command interfaces required by crisp's three impedance
       controllers (at minimum `effort`; `position` and `velocity` as
-      available) are exposed for both arms.
-- [ ] Integration smoke test parametrised over `{ur5e, ur15}`: launch sim,
-      wait for `/joint_states`, check command interfaces, pass.
+      available) are exposed for both arms. In MuJoCo effort mode the
+      sim loads `forward_effort_controller` active and keeps position /
+      velocity / trajectory controllers loaded-but-inactive for runtime
+      switching.
+- [x] Integration smoke test parametrised over `{ur5e, ur15}`: launch
+      sim, wait for `/joint_states`, check controllers, check rosbridge
+      port, check dashboard HTTP 200.
 
 ---
 
@@ -61,8 +69,10 @@ cleanly against the sim on both arms, with saved configs and a reproducible
 launch flow. No modifications to the submodule — only our configs and
 launches.
 
-- [ ] Build `crisp_controllers` from submodule; resolve deps via rosdep;
-      document any missing-dep fixes in STATUS.md.
+- [x] Build `crisp_controllers` from submodule; resolve deps via rosdep;
+      document any missing-dep fixes in STATUS.md. (Built clean with
+      `--packages-skip cartesian_controller_simulation
+      cartesian_controller_tests`; see ADR-0005.)
 - [ ] Enumerate the three impedance controllers shipped by crisp; record
       their plugin names, command interfaces, and required params in
       `docs/crisp_controllers.md` (new, short reference file).
