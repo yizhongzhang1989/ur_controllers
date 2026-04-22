@@ -18,7 +18,7 @@ Evaluate and develop UR robot controllers:
 
 | Path | Ownership | Rule |
 |------|-----------|------|
-| `third_party/*` | External (git submodules) | **Never modify.** Only bump submodule commit, and only on human request. |
+| `third_party/*` | External (git submodules) | **Never modify** `crisp_controllers/` and `cartesian_controllers/` — read-only. `ur_simulator/` is ours: work on its `auto_dev` branch only, commit inside the submodule, then bump the pointer here. |
 | `src/*` | Ours | All new C++/Python controller code goes here. |
 | `bringup/*` | Ours | Launch files and configs for sim and real robot. |
 | `evaluation/*` | Ours | Benchmark harness and scenarios. |

@@ -11,10 +11,10 @@ Legend: `[ ]` todo, `[~]` in progress, `[x]` done, `[!]` blocked (see STATUS.md)
 
 - [x] Create repo scaffolding (directories, docs, scripts).
 - [ ] Decide ROS 2 distro; record in `docs/DECISIONS.md`.
-- [ ] Add git submodules under `third_party/`:
-  - [ ] `ur_simulator` — https://github.com/yizhongzhang1989/ur_simulator.git
-  - [ ] `crisp_controllers` — https://github.com/yizhongzhang1989/crisp_controllers.git
-  - [ ] `cartesian_controllers` — https://github.com/yizhongzhang1989/cartesian_controllers.git
+- [x] Add git submodules under `third_party/`:
+  - [x] `ur_simulator` — https://github.com/yizhongzhang1989/ur_simulator.git (tracking `auto_dev`)
+  - [x] `crisp_controllers` — https://github.com/yizhongzhang1989/crisp_controllers.git (read-only)
+  - [x] `cartesian_controllers` — https://github.com/yizhongzhang1989/cartesian_controllers.git (read-only)
 - [ ] Add top-level colcon workspace config (symlinks or `COLCON_IGNORE` markers).
 - [ ] Add `.pre-commit-config.yaml` (clang-format, ruff, trailing whitespace).
 - [ ] Add CI workflow `.github/workflows/ci.yml`: build + unit tests headless.

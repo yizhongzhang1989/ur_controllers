@@ -8,8 +8,11 @@ _Last updated: 2026-04-22 (bootstrap commit; not yet auto-maintained)._
 
 ## Last completed task
 
-- Repo scaffolding created: directory tree, AGENTS.md, ROADMAP.md, DECISIONS.md,
-  STATUS.md, dev-loop scripts.
+- Submodules added under `third_party/`:
+  - `ur_simulator` (ours, tracking `auto_dev` branch, pushed to origin)
+  - `crisp_controllers` (read-only)
+  - `cartesian_controllers` (read-only)
+- ADR-0003 recorded.
 
 ## Next task (agent should pick this up)
 

@@ -1,0 +1,10 @@
+[submodule "third_party/ur_simulator"]
+	path = third_party/ur_simulator
+	url = https://github.com/yizhongzhang1989/ur_simulator.git
+	branch = auto_dev
+[submodule "third_party/crisp_controllers"]
+	path = third_party/crisp_controllers
+	url = https://github.com/yizhongzhang1989/crisp_controllers.git
+[submodule "third_party/cartesian_controllers"]
+	path = third_party/cartesian_controllers
+	url = https://github.com/yizhongzhang1989/cartesian_controllers.git
