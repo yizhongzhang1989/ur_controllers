@@ -5,6 +5,22 @@ unchecked items. Within a milestone, tasks are also ordered.
 
 Legend: `[ ]` todo, `[~]` in progress, `[x]` done, `[!]` blocked (see STATUS.md).
 
+Cross-cutting rules:
+
+- **Every simulation task must pass on BOTH `ur5e` and `ur15`.** A task is
+  not done until both arms run the same controller with identical metrics
+  criteria (gains may differ, but scenarios and pass/fail thresholds are
+  the same).
+- **Real UR15 is out of scope right now.** Do not create or exercise any
+  real-robot launch file or driver config in this phase. M-REAL below is a
+  placeholder for later; the agent must not enter it.
+- `third_party/ur_simulator` is ours — edit on its `auto_dev` branch
+  whenever the simulator is missing something a controller task needs
+  (e.g. UR15 description, better joint limits, effort interface fidelity).
+  Bump the submodule pointer in a follow-up commit in this repo.
+- `third_party/crisp_controllers` and `third_party/cartesian_controllers`
+  are read-only. If they need patching, open an upstream issue/PR instead.
+
 ---
 
 ## M0 — Bootstrap
@@ -20,53 +36,107 @@ Legend: `[ ]` todo, `[~]` in progress, `[x]` done, `[!]` blocked (see STATUS.md)
 - [ ] Add CI workflow `.github/workflows/ci.yml`: build + unit tests headless.
 - [ ] Write `scripts/setup_env.sh` to install ROS deps via `rosdep`.
 
-## M1 — Simulator brings up a UR arm
+## M1 — Simulator brings up UR5e and UR15
 
-- [ ] `bringup/launch/sim_bringup.launch.py` starts `ur_simulator` with a UR
-      description.
-- [ ] Verify `/joint_states` publishes at expected rate.
-- [ ] Verify command interfaces accept position/velocity/effort as claimed
-      by the sim.
-- [ ] Add integration smoke test: launch sim, wait for `/joint_states`, pass.
+Goal: a single launch file takes a `robot:=ur5e|ur15` arg and stands up the
+sim with that arm. Both must work before M2 starts.
 
-## M2 — Third-party controllers run in sim
+- [ ] Confirm `ur_simulator` ships descriptions for both `ur5e` and `ur15`.
+      If not, add/fix them on the submodule's `auto_dev` branch.
+- [ ] `bringup/launch/sim_bringup.launch.py` with `robot` arg; default
+      `ur5e`.
+- [ ] Verify `/joint_states` publishes at expected rate for both arms.
+- [ ] Verify the command interfaces required by crisp's three impedance
+      controllers (at minimum `effort`; `position` and `velocity` as
+      available) are exposed for both arms.
+- [ ] Integration smoke test parametrised over `{ur5e, ur15}`: launch sim,
+      wait for `/joint_states`, check command interfaces, pass.
 
-- [ ] Build `crisp_controllers` from submodule; resolve deps.
-- [ ] Launch `crisp` joint impedance controller against sim; tune minimal
-      working gains.
-- [ ] Build `cartesian_controllers` from submodule; resolve deps.
-- [ ] Launch at least one `cartesian_controllers` mode against sim.
-- [ ] Record baseline rosbags under `evaluation/baselines/` (gitignored; store
-      manifest only).
+---
 
-## M3 — Own simplified joint impedance controller
+## M2 — Make `crisp_controllers` work in sim (PRIORITY 1)
 
-- [ ] Study crisp joint impedance; append `DECISIONS.md` entry listing kept
-      vs dropped features.
-- [ ] Create package `src/simple_joint_impedance_controller/` (ros2_control
-      plugin, `controller_interface::ControllerInterface`).
-- [ ] Control law: `tau = K (q_d - q) - D * qdot`, with torque saturation
-      and safe defaults.
-- [ ] Parameters via `generate_parameter_library` (`K`, `D`, `tau_max`,
-      `joints`).
+Goal: the three impedance controllers shipped by `crisp_controllers` run
+cleanly against the sim on both arms, with saved configs and a reproducible
+launch flow. No modifications to the submodule — only our configs and
+launches.
+
+- [ ] Build `crisp_controllers` from submodule; resolve deps via rosdep;
+      document any missing-dep fixes in STATUS.md.
+- [ ] Enumerate the three impedance controllers shipped by crisp; record
+      their plugin names, command interfaces, and required params in
+      `docs/crisp_controllers.md` (new, short reference file).
+- [ ] Controller 1 (crisp joint impedance): write
+      `bringup/config/crisp_joint_impedance.{ur5e,ur15}.yaml`, wire it into
+      `bringup/launch/crisp_bringup.launch.py`, bring it up on ur5e.
+- [ ] Same controller, bring it up on ur15.
+- [ ] Controller 2 (second crisp impedance variant): same two-step rollout
+      (ur5e, then ur15).
+- [ ] Controller 3 (third crisp impedance variant): same two-step rollout.
+- [ ] Integration tests under `tests/integration/test_crisp_*.py`: for each
+      of the three controllers and each of `{ur5e, ur15}`, send a small
+      regulation command and assert bounded tracking error within a fixed
+      time window.
+- [ ] Record baseline rosbags under `evaluation/baselines/crisp/`
+      (gitignored payload; commit a manifest `.yaml` of what was recorded).
+
+---
+
+## M3 — Our own simplified joint impedance controller (PRIORITY 2)
+
+Goal: a lightweight in-tree controller that we fully own, modelled on the
+crisp joint impedance controller from M2 but stripped of features we don't
+need. It must match crisp's behaviour on a baseline regulation scenario
+within an agreed tolerance (set in M4).
+
+- [ ] Study the crisp joint impedance implementation we got running in M2.
+      Append a `DECISIONS.md` entry enumerating what to keep vs drop
+      (gravity comp, nullspace, friction comp, command interpolation, etc.).
+- [ ] Create package `src/simple_joint_impedance_controller/`
+      (`controller_interface::ControllerInterface` plugin, `ament_cmake`).
+- [ ] Control law baseline: `tau = K (q_d - q) - D * qdot`, with torque
+      saturation and safe defaults. Optional gravity-comp hook only if M2
+      showed it is needed to match crisp.
+- [ ] Parameters via `generate_parameter_library`: `joints`, `K`, `D`,
+      `tau_max`, command topic, optional feature flags.
 - [ ] Unit tests (gtest) for the control-law math, no ROS.
-- [ ] Integration test: load plugin in sim, step input, assert settling
-      within tolerance.
+- [ ] Integration tests under `tests/integration/test_simple_jimp_*.py`
+      for `{ur5e, ur15}`: step + regulation, bounded error.
+- [ ] Update `bringup/launch/` with a `simple_jimp_bringup.launch.py`
+      mirroring the crisp launch, so comparison later is a single flag.
 
-## M4 — Evaluation harness
+---
+
+## M4 — Make `cartesian_controllers` work in sim (PRIORITY 3)
+
+Goal: at least one working task-space controller from `cartesian_controllers`
+on both arms, for later comparison / use alongside our joint-space work.
+
+- [ ] Build `cartesian_controllers` from submodule; resolve deps.
+- [ ] Pick a primary mode (e.g. cartesian motion + compliance) and write
+      `bringup/config/cartesian_motion.{ur5e,ur15}.yaml`.
+- [ ] Launch file `bringup/launch/cartesian_bringup.launch.py`; bring up on
+      ur5e, then ur15.
+- [ ] Integration tests under `tests/integration/test_cartesian_*.py` for
+      each arm: commanded TCP pose is tracked within tolerance.
+- [ ] Optional: wire a second cartesian mode if time permits.
+
+---
+
+## M5 — Evaluation and comparison harness
 
 - [ ] `evaluation/scenarios/*.yaml` schema (step, sine, regulation, random
       waypoints).
 - [ ] `evaluation/run_evaluation.py` runs a scenario against a named
-      controller, emits CSV + plot.
+      controller on a named arm, emits CSV + plot.
 - [ ] Metrics: RMSE, settling time, overshoot, control effort.
-- [ ] Comparison test: same scenario on crisp vs ours; emit report under
-      `evaluation/reports/`.
+- [ ] Comparison test: same scenarios on crisp-joint-impedance vs our
+      simple joint impedance, for both `ur5e` and `ur15`. Emit a report
+      under `evaluation/reports/`.
 
-## M5 — Real UR15 bringup (human-gated)
+---
 
-- [ ] `bringup/launch/real_bringup.launch.py` using the UR ROS 2 driver.
-- [ ] Safety checklist in `docs/SAFETY.md` (e-stop, reduced mode, joint
-      limits, stiffness caps).
-- [ ] Dry-run: controllers loaded, commands zero, verify no motion.
-- [ ] Re-run M4 scenarios at conservative gains, human in the loop.
+## M-REAL — Real UR15 bringup (OUT OF SCOPE FOR NOW)
+
+Do not enter this milestone without an explicit instruction from the
+operator. Left here as a placeholder only.

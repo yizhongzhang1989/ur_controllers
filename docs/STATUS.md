@@ -4,15 +4,17 @@ _Last updated: 2026-04-22 (bootstrap commit; not yet auto-maintained)._
 
 ## Current milestone
 
-**M0 — Bootstrap** (in progress)
+**M0 — Bootstrap** (in progress). After M0, priority order is: M2 (crisp
+controllers working in sim) → M3 (our own joint impedance) → M4 (cartesian
+controllers). Every sim task must pass on both `ur5e` and `ur15`. Real UR15
+is explicitly out of scope for now.
 
 ## Last completed task
 
-- Submodules added under `third_party/`:
-  - `ur_simulator` (ours, tracking `auto_dev` branch, pushed to origin)
-  - `crisp_controllers` (read-only)
-  - `cartesian_controllers` (read-only)
-- ADR-0003 recorded.
+- Submodules added under `third_party/`.
+- Roadmap re-prioritised: crisp first, then our own joint impedance, then
+  cartesian_controllers. UR5e and UR15 are both first-class sim targets.
+  Real-robot work deferred.
 
 ## Next task (agent should pick this up)
 

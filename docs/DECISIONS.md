@@ -60,3 +60,28 @@ Format: ADR-lite. Do not delete past entries; supersede with a new one.
   fast-forwards to the latest `auto_dev`. Upstream `main` of ur_simulator is
   never directly touched by the agent; merges from `auto_dev` → `main` are
   human-gated via pull request.
+
+---
+
+## ADR-0004 — Task priority and sim target matrix
+
+- **Date:** 2026-04-22
+- **Status:** Accepted
+- **Context:** Operator set an explicit order of work: (1) get
+  `crisp_controllers` running — in particular its three impedance
+  controllers, (2) implement our own lightweight joint impedance
+  controller, (3) get `cartesian_controllers` running. Real UR15 hardware
+  is deferred. Both `ur5e` and `ur15` must be usable targets in sim so
+  conclusions transfer.
+- **Decision:**
+  - ROADMAP milestones reordered: M2 crisp → M3 our joint impedance →
+    M4 cartesian → M5 evaluation harness. M-REAL is a placeholder only.
+  - Every sim integration test is parametrised over `{ur5e, ur15}` and
+    must pass on both before the parent task is considered done. Gains
+    may differ per arm; scenarios and pass/fail thresholds do not.
+  - `ur_simulator` may be modified on its `auto_dev` branch whenever a
+    controller task needs something the sim does not yet provide (e.g.
+    UR15 description, correct effort interface). Such changes land as
+    commits inside the submodule plus a pointer-bump commit here.
+- **Consequences:** The agent will not enter M-REAL autonomously. The
+  simulator itself is an active work item, not a frozen dependency.

@@ -66,8 +66,14 @@ red tree.
   no ROS. Use `gtest` for C++, `pytest` for Python.
 - **Integration tests** (`tests/integration/`): `launch_testing` bringing up
   the controller against the sim; assert on `/joint_states` response.
+  **Every sim integration test must be parametrised over `{ur5e, ur15}`**
+  and pass on both arms before the task is considered done.
 - **Comparison tests** (`tests/compare/`): run identical scenario against
-  `crisp` baseline and our controller, compare metrics.
+  `crisp` baseline and our controller, compare metrics. Also parametrised
+  over `{ur5e, ur15}`.
+- **Real UR15**: do not write or run real-robot launches in this phase.
+  M-REAL in the roadmap is a placeholder and must not be entered without
+  an explicit operator instruction.
 
 ## 6. Forbidden actions
 
