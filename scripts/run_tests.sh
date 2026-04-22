@@ -84,9 +84,26 @@ fi
 say "stage 3: integration tests"
 if compgen -G "tests/integration/test_*.py" > /dev/null; then
     ran_any=1
-    if ! run_or_dry python3 -m pytest -q tests/integration; then
-        say "integration tests FAILED"
-        fail=1
+    # Integration tests need ROS + our workspace on the path. Source them
+    # here so the tests themselves don't have to.
+    integ_cmd=(python3 -m pytest -p no:anyio -q tests/integration)
+    if [[ -f /opt/ros/humble/setup.bash && -f install/setup.bash ]]; then
+        if (( DRY_RUN )); then
+            say "DRY: source /opt/ros/humble/setup.bash && source install/setup.bash && ${integ_cmd[*]}"
+        else
+            say "RUN (with ROS sourced): ${integ_cmd[*]}"
+            # shellcheck disable=SC1091
+            if ! bash -c 'source /opt/ros/humble/setup.bash && source install/setup.bash && "$@"' _ "${integ_cmd[@]}"; then
+                say "integration tests FAILED"
+                fail=1
+            fi
+        fi
+    else
+        say "ROS setup or install/ missing — running integration tests without sourcing"
+        if ! run_or_dry "${integ_cmd[@]}"; then
+            say "integration tests FAILED"
+            fail=1
+        fi
     fi
 else
     say "no tests/integration/test_*.py — skipping"
