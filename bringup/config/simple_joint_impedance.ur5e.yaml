@@ -1,0 +1,38 @@
+# Simple joint impedance controller (ours, M3) — UR5e in MuJoCo sim.
+#
+# Pure PD control law: tau = K (q_d - q) - D qdot, with torque and
+# torque-rate saturation and URDF-limit clamping on the target. No
+# gravity / Coriolis compensation (ADR-0008 keep/drop list) — the
+# per-joint stiffness below is sized so that the worst-case gravity
+# torque at the sim's home pose produces a steady-state sag well under
+# the integration test's 0.15 rad tolerance on every joint.
+#
+# Joint order matches third_party/ur_simulator's controller_manager
+# (unprefixed UR joint names). tau_max values are the UR5e joint-torque
+# datasheet limits (150 N*m on base/shoulder/elbow, 28 N*m on each
+# wrist). max_delta_tau limits step-to-step torque jumps at the sim's
+# 1 kHz update rate to avoid effort-interface discontinuities
+# (ADR-0008 keep-list #6).
+#
+# Negative damping entries are auto-filled at activation with
+# 2*sqrt(K[i]) (ADR-0008 keep-list #3); we pin damping explicitly here
+# because UR link inertias are not unity, so the `2*sqrt(K)` rule is
+# only a starting point.
+
+simple_joint_impedance_controller:
+  ros__parameters:
+    joints:
+      - shoulder_pan_joint
+      - shoulder_lift_joint
+      - elbow_joint
+      - wrist_1_joint
+      - wrist_2_joint
+      - wrist_3_joint
+
+    k:             [400.0, 800.0, 400.0, 200.0, 100.0,  50.0]
+    d:             [ 40.0,  60.0,  40.0,  25.0,  15.0,  10.0]
+    tau_max:       [150.0, 150.0, 150.0,  28.0,  28.0,  28.0]
+    max_delta_tau: [ 20.0,  20.0,  20.0,  10.0,  10.0,  10.0]
+
+    command_topic: "~/target_joint"
+    diagnostics_topic: "~/tau_d"

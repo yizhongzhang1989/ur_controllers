@@ -1,17 +1,22 @@
 # Status
 
-_Last updated: 2026-04-23 (feat(m3): flesh out simple_joint_impedance
-control law — `update()` now reads state, applies PD + rate + abs
-torque saturation, clamps targets into URDF limits, writes
-`<joint>/effort`, and publishes `~/tau_d`. Gate green in ~3:50
-with 22 gtests + 5 crisp_controllers gtests + 8 integration tests.)_
+_Last updated: 2026-04-23 (feat(m3): wire `simple_joint_impedance_controller`
+into sim via `simple_jimp_bringup.launch.py` + per-arm configs, add
+`{ur5e, ur15}` regulation integration test. Gate green in ~4:30 with 22
+`test_math` gtests + 5 `crisp_controllers` gtests + **10** integration
+tests.)_
 
 ## Current milestone
 
 **M3 — our own simplified joint impedance controller: IN PROGRESS.**
-M0–M2 done. ADR-0008 fixes the feature scope; previous iteration
-landed the package skeleton. This iteration implements the control
-law baseline (ROADMAP M3 bullet 3):
+M0–M2 done. ADR-0008 fixes the feature scope; the control law landed
+last iteration. This iteration closes the last two open M3 bullets
+(launch + integration tests) and leaves only the `generate_parameter_
+library` unit-test wiring bullet as explicitly optional polish — the
+parameters are already generated and exercised end-to-end by the
+integration tests below.
+
+Previous iteration notes (control law baseline, still current):
 
 - `on_configure` validates that `k`, `d`, `tau_max`, and `max_delta_tau`
   are the same length as `joints`; fetches `robot_description` from
@@ -49,6 +54,24 @@ from deprecated `realtime_tools/*.h` to `realtime_tools/*.hpp` headers.
 
 ## Last completed tasks
 
+- **M3 — sim bring-up + regulation integration test for
+  `simple_joint_impedance_controller` on `{ur5e, ur15}`.** Added
+  `bringup/config/simple_joint_impedance.{ur5e,ur15}.yaml` with per-arm
+  K/D/tau_max/max_delta_tau tuned so pure PD (no gravity comp, per
+  ADR-0008) holds pose within the same 0.15 rad tolerance used by the
+  crisp joint-impedance test. UR15 stiffness is ~3× UR5e's to counter
+  the larger gravity torques on shoulder_lift / elbow. Added
+  `bringup/launch/simple_jimp_bringup.launch.py` mirroring
+  `crisp_bringup.launch.py` (spawn `--inactive`, then
+  `switch_controllers --strict` from `forward_effort_controller` to
+  our controller, ADR-0007). Added
+  `tests/integration/test_simple_jimp_regulation.py` parametrised over
+  `{ur5e, ur15}`, structurally identical to
+  `tests/integration/test_crisp_joint_impedance.py` so the M5
+  comparison harness can flip between controllers with a single flag.
+  All 10 integration tests pass (sim smoke ×2 + 3 crisp roles ×2 + our
+  controller ×2); `scripts/run_tests.sh` green in ~4:30. Gravity-comp
+  hook remains unused — pure PD holds both arms within tolerance.
 - **M3 — control law baseline in `simple_joint_impedance_controller`.**
   Replaces the no-op skeleton `update()` with the full PD + saturation
   pipeline described above. ~280 lines of C++ (+header changes) and
@@ -65,21 +88,18 @@ from deprecated `realtime_tools/*.h` to `realtime_tools/*.hpp` headers.
 
 ## Next task (agent should pick this up)
 
-**M3 — integration tests `tests/integration/test_simple_jimp_*.py`
-parametrised over `{ur5e, ur15}`.** Mirror
-`tests/integration/test_crisp_joint_impedance.py`: bring up sim,
-switch from `forward_effort_controller` to
-`simple_joint_impedance_controller` (ADR-0007 pattern), wait for
-`/joint_states`, publish a small regulation target on
-`/simple_joint_impedance_controller/target_joint`, assert bounded
-tracking error within a fixed window. Also needed: a
-`bringup/launch/simple_jimp_bringup.launch.py` mirroring
-`bringup/launch/crisp_bringup.launch.py`, plus
-`bringup/config/simple_joint_impedance.{ur5e,ur15}.yaml` with K/D/
-tau_max/max_delta_tau tuned to hold against gravity on each arm with
-pure PD. Per ADR-0008, if regulation cannot hold on either arm with
-any reasonable PD-only gains, the gravity-comp hook becomes a
-follow-up item with its own ADR before it is added.
+**M3 done — move on to M4 (`cartesian_controllers` in sim).** All M3
+ROADMAP bullets the agent can close alone are now ticked: package
+skeleton, control-law baseline, `generate_parameter_library` schema,
+unit tests on the math, integration tests on both arms, matching
+launch file. The remaining `parameters via generate_parameter_library`
+and "unit tests for the control-law math" bullets are already satisfied
+by `src/simple_joint_impedance_controller/{src/*.yaml, tests/test_math.cpp}`
+and the 22-case gtest suite exercised each run. Tick those in
+`docs/ROADMAP.md` as the first step of the next iteration, then start
+M4 bullet 1 (build `cartesian_controllers` from submodule — already
+builds clean in the workspace per ADR-0005, so this mostly means
+picking a primary cartesian mode and wiring the first per-arm YAML).
 
 ## Build status
 
@@ -91,18 +111,23 @@ follow-up item with its own ADR before it is added.
   - `crisp_controllers`
   - `ur_sim_config`
   - `ur_simulation_gz`
-  - `simple_joint_impedance_controller` (now with real control law;
-    adds `urdf` to deps)
+  - `simple_joint_impedance_controller` (control law + sim bring-up;
+    deps include `urdf`)
 - Skipped: `cartesian_controller_simulation`, `cartesian_controller_tests`
   (ADR-0005). `scripts/run_tests.sh` stage 2 skips the same pair.
+- Bring-up assets for our controller: `bringup/launch/simple_jimp_bringup
+  .launch.py` + `bringup/config/simple_joint_impedance.{ur5e,ur15}.yaml`.
+  Launch pattern matches `crisp_bringup.launch.py`.
 
 ## Test status
 
 - `scripts/run_tests.sh` runs unit → colcon test → integration. Green
-  in ~3:50 this iteration.
-- Test counts: **22** `test_math` gtests (simple_joint_impedance_controller,
-  up from 14) + 5 `crisp_controllers` gtests + 8 integration tests
-  (sim smoke + 3 crisp roles, each ×{ur5e, ur15}).
+  in ~4:30 this iteration (extra ~40 s for the two new simple_jimp
+  integration tests, which each cold-start MuJoCo).
+- Test counts: **22** `test_math` gtests
+  (simple_joint_impedance_controller) + 5 `crisp_controllers` gtests
+  + **10** integration tests (sim smoke + 3 crisp roles + our
+  simple_joint_impedance_controller, each ×{ur5e, ur15}).
 - Integration stage sources `/opt/ros/humble/setup.bash` and
   `install/setup.bash` before pytest.
 - `scripts/record_crisp_baseline.sh` is a one-shot baseline recorder,
@@ -118,10 +143,13 @@ None currently blocking. Informational:
   `ws://localhost:9090`. Both are pkill'd + port-cleared by
   `scripts/kill_sim.sh`.
 - Gravity-comp hook for our simple joint impedance controller is
-  **not** pre-approved — ADR-0008 flags it as the first extension to
-  revisit only if the M3 integration test can't hold against gravity
-  with pure PD on either arm. If that happens, a follow-up ADR is
-  required before adding the hook.
+  **not needed** for the M3 regulation test on either arm — pure PD
+  with the per-arm gains in `bringup/config/simple_joint_impedance
+  .{ur5e,ur15}.yaml` holds both arms within the same 0.15 rad
+  tolerance used for the crisp joint-impedance test. ADR-0008's
+  gravity-comp-only-if-needed escape hatch therefore remains unused;
+  revisit only if a future scenario (dynamic targets, heavier payload)
+  shows PD alone is insufficient.
 
 ## Recent commits
 

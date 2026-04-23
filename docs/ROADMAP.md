@@ -118,15 +118,24 @@ within an agreed tolerance (set in M4).
       Done as **ADR-0008** in `docs/DECISIONS.md`.
 - [x] Create package `src/simple_joint_impedance_controller/`
       (`controller_interface::ControllerInterface` plugin, `ament_cmake`).
-- [ ] Control law baseline: `tau = K (q_d - q) - D * qdot`, with torque
+- [x] Control law baseline: `tau = K (q_d - q) - D * qdot`, with torque
       saturation and safe defaults. Optional gravity-comp hook only if M2
-      showed it is needed to match crisp.
-- [ ] Parameters via `generate_parameter_library`: `joints`, `K`, `D`,
+      showed it is needed to match crisp. (Landed last iteration; this
+      iteration confirms pure PD holds within tolerance on both arms —
+      gravity-comp hook stays unused per ADR-0008.)
+- [x] Parameters via `generate_parameter_library`: `joints`, `K`, `D`,
       `tau_max`, command topic, optional feature flags.
-- [ ] Unit tests (gtest) for the control-law math, no ROS.
-- [ ] Integration tests under `tests/integration/test_simple_jimp_*.py`
+      (`src/simple_joint_impedance_controller/src/simple_joint_impedance_controller.yaml`,
+      exercised by the integration tests below.)
+- [x] Unit tests (gtest) for the control-law math, no ROS.
+      (`src/simple_joint_impedance_controller/tests/test_math.cpp` — 22
+      cases across PD, rate/abs saturation, critical-damping auto-fill,
+      target validation, URDF-limit clamping.)
+- [x] Integration tests under `tests/integration/test_simple_jimp_*.py`
       for `{ur5e, ur15}`: step + regulation, bounded error.
-- [ ] Update `bringup/launch/` with a `simple_jimp_bringup.launch.py`
+      (`tests/integration/test_simple_jimp_regulation.py`; 0.15 rad
+      tolerance matching the crisp test.)
+- [x] Update `bringup/launch/` with a `simple_jimp_bringup.launch.py`
       mirroring the crisp launch, so comparison later is a single flag.
 
 ---

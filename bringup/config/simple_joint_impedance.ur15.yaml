@@ -1,0 +1,28 @@
+# Simple joint impedance controller (ours, M3) — UR15 in MuJoCo sim.
+#
+# See simple_joint_impedance.ur5e.yaml for the rationale. UR15 is a
+# significantly heavier arm (larger link masses, longer segments), so
+# gravity torques on shoulder_lift / elbow are several times those of
+# UR5e. Stiffness is scaled up accordingly to keep the steady-state
+# sag under pure PD below the 0.15 rad integration-test tolerance.
+# tau_max is sized generously below UR15's rated joint torques so the
+# controller never drives the effort interface into saturation during
+# regulation — comparison tuning in M5 may revisit these numbers.
+
+simple_joint_impedance_controller:
+  ros__parameters:
+    joints:
+      - shoulder_pan_joint
+      - shoulder_lift_joint
+      - elbow_joint
+      - wrist_1_joint
+      - wrist_2_joint
+      - wrist_3_joint
+
+    k:             [1200.0, 2500.0, 1200.0, 400.0, 200.0, 100.0]
+    d:             [  70.0,  100.0,   70.0,  40.0,  25.0,  15.0]
+    tau_max:       [ 400.0,  400.0,  300.0, 100.0, 100.0, 100.0]
+    max_delta_tau: [  40.0,   40.0,   40.0,  20.0,  20.0,  20.0]
+
+    command_topic: "~/target_joint"
+    diagnostics_topic: "~/tau_d"
