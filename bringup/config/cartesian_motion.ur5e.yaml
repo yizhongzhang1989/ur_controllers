@@ -1,0 +1,55 @@
+# cartesian_motion_controller — UR5e in MuJoCo sim (position mode).
+#
+# Applies `cartesian_motion_controller/CartesianMotionController`
+# from third_party/cartesian_controllers. Unlike crisp (which commands
+# the ros2_control `effort` interfaces), this plugin commands joint
+# `position` via an internal forward-dynamics IK solver.
+#
+# In our MuJoCo bring-up this means:
+#   * launch_sim.sh <robot> position  (NOT effort)
+#   * joint_trajectory_controller boots active by default and owns the
+#     position interfaces; cartesian_bringup.launch.py swaps it out for
+#     this controller via `ros2 control switch_controllers --strict`.
+#
+# On activation `CartesianMotionController::on_activate` seeds
+# `m_target_frame = m_current_frame`, so the controller holds pose
+# until a /target_frame PoseStamped is published. The M4 integration
+# test exercises that hold-pose behaviour against the same 0.15 rad
+# regulation tolerance we use for crisp and simple_jimp.
+#
+# Link names match the UR description shipped with ur_sim_config
+# (base_link, tool0 — confirmed in the generated clean URDFs under
+# install/ur_sim_config/share/ur_sim_config/mujoco/<arm>/effort/).
+#
+# Gains follow the upstream reference under
+# third_party/cartesian_controllers/cartesian_controller_simulation/
+# config/controller_manager.yaml — conservative for regulation.
+
+cartesian_motion_controller:
+  ros__parameters:
+    end_effector_link: "tool0"
+    robot_base_link: "base_link"
+
+    joints:
+      - shoulder_pan_joint
+      - shoulder_lift_joint
+      - elbow_joint
+      - wrist_1_joint
+      - wrist_2_joint
+      - wrist_3_joint
+
+    command_interfaces:
+      - position
+
+    solver:
+      error_scale: 1.0
+      iterations: 10
+      publish_state_feedback: True
+
+    pd_gains:
+      trans_x: {p: 1.0}
+      trans_y: {p: 1.0}
+      trans_z: {p: 1.0}
+      rot_x: {p: 0.5}
+      rot_y: {p: 0.5}
+      rot_z: {p: 0.5}

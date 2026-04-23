@@ -150,12 +150,27 @@ on both arms, for later comparison / use alongside our joint-space work.
       `--packages-skip cartesian_controller_simulation cartesian_controller_tests`
       (ADR-0005). Plugins enumerated in `docs/cartesian_controllers.md`;
       primary M4 mode is `cartesian_motion_controller`.
-- [ ] Pick a primary mode (e.g. cartesian motion + compliance) and write
-      `bringup/config/cartesian_motion.{ur5e,ur15}.yaml`.
-- [ ] Launch file `bringup/launch/cartesian_bringup.launch.py`; bring up on
-      ur5e, then ur15.
-- [ ] Integration tests under `tests/integration/test_cartesian_*.py` for
-      each arm: commanded TCP pose is tracked within tolerance.
+- [x] Pick a primary mode (e.g. cartesian motion + compliance) and write
+      `bringup/config/cartesian_motion.{ur5e,ur15}.yaml`. Primary mode
+      is `cartesian_motion_controller/CartesianMotionController`; both
+      per-arm YAMLs share identical `pd_gains` + `solver` blocks (see
+      the in-file notes for why the position-interface design makes a
+      single gain set fit both arms).
+- [x] Launch file `bringup/launch/cartesian_bringup.launch.py`; bring up on
+      ur5e, then ur15. Swaps `joint_trajectory_controller` →
+      `cartesian_motion_controller` via `switch_controllers --strict`.
+      Fetches `robot_description` from `/robot_state_publisher` at
+      launch time and feeds it to the spawner as a second
+      `--param-file` — see STATUS "robot_description propagation
+      gotcha" for why this is necessary on our Humble sim.
+- [x] Integration tests under `tests/integration/test_cartesian_*.py` for
+      each arm: commanded TCP pose is tracked within tolerance. Done as
+      `tests/integration/test_cartesian_motion.py` parametrised over
+      `{ur5e, ur15}`; relies on the plugin's `on_activate` auto-hold
+      (seeds `m_target_frame = m_current_frame`) and asserts joints
+      stay within 0.15 rad for 5 s — same threshold as the crisp and
+      simple_jimp regulation tests so M5 can flip controllers with one
+      flag.
 - [ ] Optional: wire a second cartesian mode if time permits.
 
 ---
