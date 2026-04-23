@@ -145,7 +145,11 @@ within an agreed tolerance (set in M4).
 Goal: at least one working task-space controller from `cartesian_controllers`
 on both arms, for later comparison / use alongside our joint-space work.
 
-- [ ] Build `cartesian_controllers` from submodule; resolve deps.
+- [x] Build `cartesian_controllers` from submodule; resolve deps.
+      Green in our workspace with
+      `--packages-skip cartesian_controller_simulation cartesian_controller_tests`
+      (ADR-0005). Plugins enumerated in `docs/cartesian_controllers.md`;
+      primary M4 mode is `cartesian_motion_controller`.
 - [ ] Pick a primary mode (e.g. cartesian motion + compliance) and write
       `bringup/config/cartesian_motion.{ur5e,ur15}.yaml`.
 - [ ] Launch file `bringup/launch/cartesian_bringup.launch.py`; bring up on

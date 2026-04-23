@@ -1,155 +1,145 @@
 # Status
 
-_Last updated: 2026-04-23 (feat(m3): wire `simple_joint_impedance_controller`
-into sim via `simple_jimp_bringup.launch.py` + per-arm configs, add
-`{ur5e, ur15}` regulation integration test. Gate green in ~4:30 with 22
-`test_math` gtests + 5 `crisp_controllers` gtests + **10** integration
-tests.)_
+_Last updated: 2026-04-23 (docs(m4): enumerate cartesian_controllers
+plugins in `docs/cartesian_controllers.md`; tick M4 bullet 1 (build).
+Doc-only iteration — no code changes, test gate unchanged.)_
 
 ## Current milestone
 
-**M3 — our own simplified joint impedance controller: IN PROGRESS.**
-M0–M2 done. ADR-0008 fixes the feature scope; the control law landed
-last iteration. This iteration closes the last two open M3 bullets
-(launch + integration tests) and leaves only the `generate_parameter_
-library` unit-test wiring bullet as explicitly optional polish — the
-parameters are already generated and exercised end-to-end by the
-integration tests below.
+**M4 — make `cartesian_controllers` work in sim: IN PROGRESS.** M0–M3
+done. This iteration kicks M4 off the same way M2 started: with a short
+in-tree reference doc (`docs/cartesian_controllers.md`) enumerating the
+plugins shipped by the submodule so the next iteration can pick a
+primary mode and wire its first per-arm YAML without re-doing the
+investigation.
 
-Previous iteration notes (control law baseline, still current):
+Key observations from that reference (relevant to the next iteration):
 
-- `on_configure` validates that `k`, `d`, `tau_max`, and `max_delta_tau`
-  are the same length as `joints`; fetches `robot_description` from
-  `/robot_state_publisher` (same pattern as crisp), parses it with
-  `urdf::Model`, and caches per-joint `[q_lower, q_upper]` limits
-  (treating CONTINUOUS joints as ±inf). Also creates the
-  `sensor_msgs/JointState` subscriber on `params_.command_topic` with
-  a `realtime_tools::RealtimeBuffer` and the `~/tau_d` publisher with
-  `realtime_tools::RealtimePublisher`.
-- `on_activate` refreshes gains, runs `auto_fill_critical_damping`
-  (negative `d[i]` → `2*sqrt(k[i])`), zero-inits `tau_prev_` and
-  `q_d_`, arms `seed_on_first_update_`, and drops any stale buffered
-  target. `on_deactivate` zeroes the effort command before handing
-  back interfaces (ADR-0007 clean hand-off).
-- `update()` pipeline: read `<joint>/{position, velocity}` in the
-  order we declared; on the very first cycle copy measured `q` into
-  `q_d` (hold-position seed, same contract as crisp's joint role);
-  non-blocking `readFromRT()` for a new target, validated via the new
-  pure helper `validate_target_joint_state` (length + strict
-  order-matching names + finiteness) then clamped by `clamp_to_limits`
-  into the URDF limits — malformed messages are throttled-warned and
-  the previous `q_d` is held; `compute_pd_torque` →
-  `saturate_torque_rate` → `saturate_torque_abs` → write to
-  `<joint>/effort` and publish `~/tau_d` via `RealtimePublisher`.
-
-Tests added: 8 new gtests for `validate_target_joint_state` covering
-position-only-without-names, position+velocity, name reorder reject,
-position/velocity length-mismatch reject, non-finite reject on both
-position and velocity, and empty-expected-joints reject. Total
-`test_math` suite now 22 cases, all green.
-
-CMake/package: added `urdf` to `find_package`/`ament_target_dependencies`/
-`ament_export_dependencies` and to `<depend>` in `package.xml`. Switched
-from deprecated `realtime_tools/*.h` to `realtime_tools/*.hpp` headers.
+- Three plugin classes ship:
+  `cartesian_motion_controller/CartesianMotionController`,
+  `cartesian_compliance_controller/CartesianComplianceController`, and
+  `cartesian_force_controller/CartesianForceController`. All derive from
+  `cartesian_controller_base::CartesianControllerBase`.
+- Command interfaces are **position** (and/or velocity), **not** effort.
+  This is the key structural difference from crisp/our simple_jimp. In
+  sim this means we run against `scripts/launch_sim.sh <robot> position`
+  (not `effort`) and atomically swap
+  `joint_trajectory_controller` → `<cartesian_controller>` via
+  `ros2 control switch_controllers --strict`, mirroring the
+  `forward_effort_controller` swap pattern from ADR-0007.
+- `CartesianMotionController::on_activate` seeds
+  `m_target_frame = m_current_frame` (motion controller `.cpp:91`), so
+  the controller holds pose on activation — the first integration test
+  can assert "arm doesn't diverge after activation" without needing a
+  synthesised Cartesian target, analogous to the crisp joint-impedance
+  regulation test.
+- Compliance / force controllers need an `ft_sensor_ref_link` on the
+  URDF chain + an `~/ft_sensor_wrench` publisher; the sim does not
+  expose an F/T sensor frame today. Those are out of scope for M4
+  bullet 1/2/3 and are candidates for the "optional second cartesian
+  mode" roadmap bullet once the sim gains an F/T link on `auto_dev`.
 
 ## Last completed tasks
 
+- **M4 kick-off: `docs/cartesian_controllers.md` reference + tick M4
+  bullet 1 (build).** Same cadence as commit `7106265 docs(crisp):
+  enumerate crisp_controllers plugins and impedance roles` at the
+  start of M2. Records plugin names, command/state interfaces, target
+  topics, and bring-up implications against the sim. M4 bullet 1 in
+  `docs/ROADMAP.md` ticked off — `cartesian_controllers` already builds
+  green in our workspace per ADR-0005 and stage 2 of
+  `scripts/run_tests.sh`, nothing new to resolve. No code changes this
+  iteration; test gate unchanged.
 - **M3 — sim bring-up + regulation integration test for
-  `simple_joint_impedance_controller` on `{ur5e, ur15}`.** Added
-  `bringup/config/simple_joint_impedance.{ur5e,ur15}.yaml` with per-arm
-  K/D/tau_max/max_delta_tau tuned so pure PD (no gravity comp, per
-  ADR-0008) holds pose within the same 0.15 rad tolerance used by the
-  crisp joint-impedance test. UR15 stiffness is ~3× UR5e's to counter
-  the larger gravity torques on shoulder_lift / elbow. Added
-  `bringup/launch/simple_jimp_bringup.launch.py` mirroring
-  `crisp_bringup.launch.py` (spawn `--inactive`, then
-  `switch_controllers --strict` from `forward_effort_controller` to
-  our controller, ADR-0007). Added
-  `tests/integration/test_simple_jimp_regulation.py` parametrised over
-  `{ur5e, ur15}`, structurally identical to
-  `tests/integration/test_crisp_joint_impedance.py` so the M5
-  comparison harness can flip between controllers with a single flag.
-  All 10 integration tests pass (sim smoke ×2 + 3 crisp roles ×2 + our
-  controller ×2); `scripts/run_tests.sh` green in ~4:30. Gravity-comp
-  hook remains unused — pure PD holds both arms within tolerance.
+  `simple_joint_impedance_controller` on `{ur5e, ur15}`.** See prior
+  STATUS: per-arm YAMLs + `simple_jimp_bringup.launch.py` +
+  `tests/integration/test_simple_jimp_regulation.py` (parametrised
+  over both arms). 10 integration tests green in `scripts/run_tests.sh`.
 - **M3 — control law baseline in `simple_joint_impedance_controller`.**
-  Replaces the no-op skeleton `update()` with the full PD + saturation
-  pipeline described above. ~280 lines of C++ (+header changes) and
-  87 lines of new unit tests. Single commit, still ≈200 lines of
-  controller code (ADR-0008 budget).
+  See prior STATUS.
 - **Fix: strictly serialise MuJoCo controller spawners
-  (`third_party/ur_simulator`).** Previous STATUS entry retained.
+  (`third_party/ur_simulator`).** See prior STATUS.
 - **M3 — `simple_joint_impedance_controller` package skeleton.** See
   prior STATUS.
-- **M3 — ADR-0008: scope the simplified joint impedance controller.** See
-  prior STATUS.
+- **M3 — ADR-0008: scope the simplified joint impedance controller.**
+  See prior STATUS.
 - **M2 baseline rosbags + manifests.** See prior STATUS.
-- **Sync `docs/ROADMAP.md` M2 ticks with reality.** See prior STATUS.
 
 ## Next task (agent should pick this up)
 
-**M3 done — move on to M4 (`cartesian_controllers` in sim).** All M3
-ROADMAP bullets the agent can close alone are now ticked: package
-skeleton, control-law baseline, `generate_parameter_library` schema,
-unit tests on the math, integration tests on both arms, matching
-launch file. The remaining `parameters via generate_parameter_library`
-and "unit tests for the control-law math" bullets are already satisfied
-by `src/simple_joint_impedance_controller/{src/*.yaml, tests/test_math.cpp}`
-and the 22-case gtest suite exercised each run. Tick those in
-`docs/ROADMAP.md` as the first step of the next iteration, then start
-M4 bullet 1 (build `cartesian_controllers` from submodule — already
-builds clean in the workspace per ADR-0005, so this mostly means
-picking a primary cartesian mode and wiring the first per-arm YAML).
+**M4 bullet 2: pick the primary cartesian mode and write
+`bringup/config/cartesian_motion.{ur5e,ur15}.yaml`.** Primary mode is
+`cartesian_motion_controller/CartesianMotionController` (no F/T sensor
+dependency, single `PoseStamped` target topic,
+activation-auto-hold — see `docs/cartesian_controllers.md` §Scope for M4).
+Configs should set `end_effector_link: tool0`, `robot_base_link:
+base_link`, UR joint list, `command_interfaces: [position]`, conservative
+`pd_gains` and `solver.iterations`. Both YAMLs can be nearly identical
+(UR arms share joint names; tune gains if ur15 needs a larger
+`error_scale`).
+
+Then M4 bullet 3: `bringup/launch/cartesian_bringup.launch.py` mirroring
+`crisp_bringup.launch.py` structure (spawn `--inactive`, then
+`switch_controllers --strict` from `joint_trajectory_controller` to
+`cartesian_motion_controller` since position-mode sim boots with JTC
+active). IMPORTANT: unlike crisp, the cartesian controller does NOT
+auto-fetch `robot_description` from `/robot_state_publisher` — the
+launch file must feed it in via a `<param>` or the spawn's
+`--param-file`, whichever pattern the upstream reference
+`controller_manager.yaml` implies (see
+`third_party/cartesian_controllers/cartesian_controller_simulation/config/controller_manager.yaml`).
+
+Then M4 bullet 4: `tests/integration/test_cartesian_motion.py`
+parametrised over `{ur5e, ur15}`, asserting (a) the
+JTC→`cartesian_motion_controller` swap landed, and (b) joints stay
+within the same 0.15 rad "regulation tolerance" window already used by
+the crisp and simple_jimp tests — reusing that threshold lets the M5
+comparison harness flip between controllers with one flag.
 
 ## Build status
 
 - ROS 2 distro: **Humble** (Ubuntu 22.04, matches system install).
 - `colcon build --symlink-install --base-paths src third_party
   --packages-skip cartesian_controller_simulation cartesian_controller_tests`
-  still produces **10** packages successfully:
-  - 6 from `cartesian_controllers`
+  produces **10** packages successfully, unchanged from prior iteration:
+  - 6 from `cartesian_controllers` (base, motion, compliance, force,
+    handles, utilities)
   - `crisp_controllers`
   - `ur_sim_config`
   - `ur_simulation_gz`
-  - `simple_joint_impedance_controller` (control law + sim bring-up;
-    deps include `urdf`)
+  - `simple_joint_impedance_controller`
 - Skipped: `cartesian_controller_simulation`, `cartesian_controller_tests`
   (ADR-0005). `scripts/run_tests.sh` stage 2 skips the same pair.
-- Bring-up assets for our controller: `bringup/launch/simple_jimp_bringup
-  .launch.py` + `bringup/config/simple_joint_impedance.{ur5e,ur15}.yaml`.
-  Launch pattern matches `crisp_bringup.launch.py`.
 
 ## Test status
 
 - `scripts/run_tests.sh` runs unit → colcon test → integration. Green
-  in ~4:30 this iteration (extra ~40 s for the two new simple_jimp
-  integration tests, which each cold-start MuJoCo).
-- Test counts: **22** `test_math` gtests
+  in ~4:30 as of the prior iteration; no code changes this iteration so
+  the gate is structurally unchanged (doc-only).
+- Test counts (unchanged): **22** `test_math` gtests
   (simple_joint_impedance_controller) + 5 `crisp_controllers` gtests
   + **10** integration tests (sim smoke + 3 crisp roles + our
   simple_joint_impedance_controller, each ×{ur5e, ur15}).
-- Integration stage sources `/opt/ros/humble/setup.bash` and
-  `install/setup.bash` before pytest.
-- `scripts/record_crisp_baseline.sh` is a one-shot baseline recorder,
-  NOT part of `run_tests.sh`.
 
 ## Blockers / open questions for operator
 
 None currently blocking. Informational:
 
-- ROS distro is effectively pinned to Humble (system install); formalise
-  via ADR if/when a second distro becomes a candidate.
+- ROS distro pinned to Humble (system install); formalise via ADR if/
+  when a second distro becomes a candidate.
 - Dashboard opens at `http://localhost:8000`; rosbridge at
   `ws://localhost:9090`. Both are pkill'd + port-cleared by
   `scripts/kill_sim.sh`.
-- Gravity-comp hook for our simple joint impedance controller is
-  **not needed** for the M3 regulation test on either arm — pure PD
-  with the per-arm gains in `bringup/config/simple_joint_impedance
-  .{ur5e,ur15}.yaml` holds both arms within the same 0.15 rad
-  tolerance used for the crisp joint-impedance test. ADR-0008's
-  gravity-comp-only-if-needed escape hatch therefore remains unused;
-  revisit only if a future scenario (dynamic targets, heavier payload)
-  shows PD alone is insufficient.
+- The cartesian compliance and force controllers both need an
+  `ft_sensor_ref_link` on the URDF chain plus an `~/ft_sensor_wrench`
+  publisher. The UR sim does not currently expose an F/T sensor frame;
+  those controllers therefore require a sim-side `auto_dev` patch
+  before they can be brought up end-to-end. Non-blocking for M4 bullets
+  1–4 (primary mode is `cartesian_motion_controller`); surface for the
+  operator only when/if the "optional second cartesian mode" bullet is
+  picked up.
+- Gravity-comp hook for `simple_joint_impedance_controller` remains
+  unused (pure PD holds both arms within the M3 tolerance).
 
 ## Recent commits
 
