@@ -374,3 +374,59 @@ Format: ADR-lite. Do not delete past entries; supersede with a new one.
   - The validator is exercised by `tests/unit/test_scenarios_schema.py`
     (35 cases). Adding cartesian step/sine/random later will require a
     new ADR superseding this one and bumping `schema_version` to 2.
+
+---
+
+## ADR-0010 — Evaluation metrics v1: joint-space only; cartesian deferred
+
+- **Date:** 2026-04-23
+- **Status:** Accepted
+- **Context:** ROADMAP M5 bullet 3 asks for metrics computation over run
+  directories produced by `evaluation/run_evaluation.py` (bullet 2). The
+  schema-v1 pass-criteria keys (ADR-0009) include `max_rmse_rad`,
+  `max_settling_time_s`, `max_overshoot_pct`, `max_control_effort_nm`
+  for joint scenarios, and `max_rmse_m` + `max_rmse_rad` (orientation)
+  for cartesian scenarios. Joint-space metrics are a direct function of
+  `target.csv` + `joint_states.csv`. Cartesian RMSE requires converting
+  `/joint_states` into a TCP pose via forward kinematics on the arm's
+  URDF chain, which needs either `tf2_ros` transform lookups against
+  the live `/tf` tree (only available mid-run) or `pinocchio` /
+  `kdl_parser` in the offline pipeline — a non-trivial addition that
+  would delay bullet 4 (comparison report).
+- **Decision:**
+  - `evaluation/compute_metrics.py` v1 implements
+    `rmse` / `settling_time` / `overshoot` / `control_effort` for
+    **joint-space** scenarios only.
+    - `rmse` — per-joint RMSE in rad, aggregated as the max across
+      joints (worst joint sets the bound).
+    - `settling_time` + `overshoot` — computed **only** for
+      `scenario_type == step`; a 5%-of-|amplitude| tolerance band with
+      a 0.01 rad floor is used for settling. Non-step scenarios record
+      both as `not_applicable`, and their corresponding pass-criteria
+      keys are marked `skipped` (never a failure).
+    - `control_effort` — **peak `|tau|`** across joints and time in
+      N·m, read from `tau_d.csv`. Absent `tau_d.csv`
+      (cartesian_motion_controller) → `skipped`.
+  - For `target.space == cartesian`, the script emits a metrics file
+    with every metric and every pass-criteria key recorded as
+    `skipped` with a clear reason and exits 0. M5 bullet 4 will
+    surface these as "not yet evaluated" in the comparison report.
+  - Output artefacts are `<run_dir>/metrics.yaml` (structured) and
+    `<run_dir>/metrics.csv` (long-format, one row per metric × joint
+    + per pass key). Exit codes: `0` all-pass/skip, `1` any
+    threshold exceeded, `2` malformed inputs.
+- **Consequences:**
+  - Joint-space scenarios (`step`, `regulation`, `sine`,
+    `random_waypoints`) are fully graded by the v1 pipeline; the
+    existing committed example scenarios all fall in this bucket.
+  - Cartesian comparison is punted to a follow-up that will either
+    add offline FK (likely via `pinocchio` since crisp already pulls
+    it in as a dep) or extend the runner to record TCP pose from
+    `/tf` during the run. When that lands, this ADR is superseded by
+    an ADR-00XX and the cartesian branch of
+    `compute_metrics_for_run` becomes a real computation.
+  - The `control_effort` semantics (peak vs integral) is fixed to
+    **peak** in v1 because the pass-criteria unit is `_nm` (N·m) not
+    `_nms` (N·m·s); switching to integral later would change the
+    threshold numbers in committed scenario files, which is a
+    schema-version-visible change and must go through a new ADR.

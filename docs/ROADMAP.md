@@ -177,11 +177,18 @@ on both arms, for later comparison / use alongside our joint-space work.
 
 ## M5 — Evaluation and comparison harness
 
-- [ ] `evaluation/scenarios/*.yaml` schema (step, sine, regulation, random
-      waypoints).
-- [ ] `evaluation/run_evaluation.py` runs a scenario against a named
-      controller on a named arm, emits CSV + plot.
-- [ ] Metrics: RMSE, settling time, overshoot, control effort.
+- [x] `evaluation/scenarios/*.yaml` schema (step, sine, regulation, random
+      waypoints). Landed as schema v1 (ADR-0009) with
+      `evaluation/scenarios/validate.py` + 35 unit tests.
+- [x] `evaluation/run_evaluation.py` runs a scenario against a named
+      controller on a named arm, emits CSV + plot. Runner lives at
+      `evaluation/run_evaluation.py` + `evaluation/_reference.py`; run
+      artefacts land under `evaluation/runs/` (gitignored). Plots are
+      deferred to bullet 4 (report generation).
+- [x] Metrics: RMSE, settling time, overshoot, control effort. Landed
+      as `evaluation/compute_metrics.py` (+ 32 unit tests).
+      Joint-space only in v1 — cartesian metrics are recorded as
+      `skipped` pending FK (ADR-0010).
 - [ ] Comparison test: same scenarios on crisp-joint-impedance vs our
       simple joint impedance, for both `ur5e` and `ur15`. Emit a report
       under `evaluation/reports/`.
