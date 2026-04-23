@@ -19,8 +19,8 @@ interfaces by:
 Args:
   robot:  ``ur5e`` | ``ur15``  — picks the per-arm YAML under
           ``bringup/config/crisp_joint_impedance.<robot>.yaml``.
-  mode:   ``joint`` | ``cartesian`` — picks the crisp role. ``gravity``
-          will be added when that role lands.
+  mode:   ``joint`` | ``cartesian`` | ``gravity`` — picks the crisp
+          role (see ``docs/crisp_controllers.md``).
 """
 
 from __future__ import annotations
@@ -42,11 +42,11 @@ from launch_ros.actions import Node
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_DIR = REPO_ROOT / "bringup" / "config"
 
-# Supported (mode -> (controller_name, role_yaml_stem)) mapping. The
-# ``gravity`` role is the follow-up after cartesian lands.
+# Supported (mode -> (controller_name, role_yaml_stem)) mapping.
 _ROLE_YAML_STEM = {
     "joint": ("joint_impedance_controller", "crisp_joint_impedance"),
     "cartesian": ("cartesian_impedance_controller", "crisp_cartesian_impedance"),
+    "gravity": ("gravity_compensation", "crisp_gravity_compensation"),
 }
 
 
@@ -115,8 +115,7 @@ def generate_launch_description() -> LaunchDescription:
             DeclareLaunchArgument(
                 "mode",
                 default_value="joint",
-                # Widen this choices list as the gravity role lands.
-                choices=["joint", "cartesian"],
+                choices=["joint", "cartesian", "gravity"],
                 description="crisp controller role to bring up.",
             ),
             OpaqueFunction(function=launch_setup),

@@ -1,0 +1,68 @@
+# crisp gravity compensation (role) — UR5e in MuJoCo sim.
+#
+# Applies the `crisp_controllers/CartesianController` plugin in its
+# "gravity_compensation" configuration (see docs/crisp_controllers.md):
+#   - all Cartesian task stiffnesses are zero,
+#   - nullspace stiffness is zero (so no joint PD either),
+#   - only the model-based feed-forward terms remain:
+#     gravity + Coriolis from pinocchio. The controller is effectively a
+#     pure model-compensation passthrough — the arm should be free to be
+#     pushed around by hand (in sim: should slowly settle under tiny
+#     residual torques, not fall or drive itself).
+#
+# Crisp takes over the `effort` command interfaces from
+# `forward_effort_controller` via `switch_controllers --strict` in
+# `crisp_bringup.launch.py` (see ADR-0007), so the sim's
+# `gravity_compensation.py` is inert while this role is active.
+#
+# Joint order matches third_party/ur_simulator's controller_manager
+# (unprefixed UR joint names; identical on ur5e and ur15).
+
+gravity_compensation:
+  ros__parameters:
+    joints:
+      - shoulder_pan_joint
+      - shoulder_lift_joint
+      - elbow_joint
+      - wrist_1_joint
+      - wrist_2_joint
+      - wrist_3_joint
+
+    end_effector_frame: tool0
+    base_frame: base
+
+    task:
+      k_pos_x: 0.0
+      k_pos_y: 0.0
+      k_pos_z: 0.0
+      k_rot_x: 0.0
+      k_rot_y: 0.0
+      k_rot_z: 0.0
+
+    nullspace:
+      stiffness: 0.0
+      damping: -1.0          # auto: 2*sqrt(stiffness) = 0
+      projector_type: none
+      max_tau: 20.0
+      regularization: 1.0e-06
+      weights:
+        shoulder_pan_joint:  1.0
+        shoulder_lift_joint: 1.0
+        elbow_joint:         1.0
+        wrist_1_joint:       1.0
+        wrist_2_joint:       1.0
+        wrist_3_joint:       1.0
+
+    use_gravity_compensation: true
+    use_coriolis_compensation: true
+    use_friction: false
+    use_local_jacobian: true
+
+    limit_error: true
+    limit_torques: true
+    max_delta_tau: 0.5
+
+    joint_limit_repulsion:
+      enabled: true
+      safe_range: 0.1
+      max_torque: 5.0

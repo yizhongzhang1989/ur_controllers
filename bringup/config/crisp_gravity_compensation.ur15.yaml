@@ -1,0 +1,57 @@
+# crisp gravity compensation (role) — UR15 in MuJoCo sim.
+#
+# See crisp_gravity_compensation.ur5e.yaml for the role rationale and
+# the relationship to the sim's forward_effort_controller. UR15 shares
+# the UR kinematic naming convention (no per-arm joint prefix in sim),
+# so the joint list is identical. No stiffness is applied in this role,
+# so gains that would differ per arm (mass, inertia) don't need tuning
+# here — pinocchio handles the model from the URDF.
+
+gravity_compensation:
+  ros__parameters:
+    joints:
+      - shoulder_pan_joint
+      - shoulder_lift_joint
+      - elbow_joint
+      - wrist_1_joint
+      - wrist_2_joint
+      - wrist_3_joint
+
+    end_effector_frame: tool0
+    base_frame: base
+
+    task:
+      k_pos_x: 0.0
+      k_pos_y: 0.0
+      k_pos_z: 0.0
+      k_rot_x: 0.0
+      k_rot_y: 0.0
+      k_rot_z: 0.0
+
+    nullspace:
+      stiffness: 0.0
+      damping: -1.0
+      projector_type: none
+      max_tau: 20.0
+      regularization: 1.0e-06
+      weights:
+        shoulder_pan_joint:  1.0
+        shoulder_lift_joint: 1.0
+        elbow_joint:         1.0
+        wrist_1_joint:       1.0
+        wrist_2_joint:       1.0
+        wrist_3_joint:       1.0
+
+    use_gravity_compensation: true
+    use_coriolis_compensation: true
+    use_friction: false
+    use_local_jacobian: true
+
+    limit_error: true
+    limit_torques: true
+    max_delta_tau: 0.5
+
+    joint_limit_repulsion:
+      enabled: true
+      safe_range: 0.1
+      max_torque: 5.0
