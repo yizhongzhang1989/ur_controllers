@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <string>
 #include <vector>
 
 namespace simple_joint_impedance_controller
@@ -122,6 +123,68 @@ inline bool saturate_torque_abs(
     }
     tau[i] = std::min(std::max(tau[i], -tau_max[i]), tau_max[i]);
   }
+  return true;
+}
+
+// Validate a sensor_msgs/JointState-shaped target (passed as raw fields so the
+// helper stays ROS-free and unit-testable). Returns true iff the message is
+// usable as a new reference configuration for `expected_joints`, in which case
+// `q_d_out` is populated and `qdot_d_out` is either the feed-forward velocity
+// (if the message carried a matching-length velocity vector) or empty.
+//
+// Rules (ADR-0008 keep-list #7):
+//  - msg_positions must have length equal to expected_joints.size();
+//  - if msg_names is non-empty, it must equal expected_joints element-wise
+//    (strict, order-matching — no permutation reordering in M3);
+//  - msg_velocities is optional: empty means "zero feed-forward", otherwise
+//    it must match the same length and be finite;
+//  - all position and velocity entries must be finite.
+// Length or order mismatch, non-finite entries, or empty expected_joints
+// return false without touching the output vectors.
+inline bool validate_target_joint_state(
+  const std::vector<std::string> & msg_names,
+  const std::vector<double> & msg_positions,
+  const std::vector<double> & msg_velocities,
+  const std::vector<std::string> & expected_joints,
+  std::vector<double> & q_d_out,
+  std::vector<double> & qdot_d_out)
+{
+  const std::size_t n = expected_joints.size();
+  if (n == 0) {
+    return false;
+  }
+  if (msg_positions.size() != n) {
+    return false;
+  }
+  if (!msg_names.empty()) {
+    if (msg_names.size() != n) {
+      return false;
+    }
+    for (std::size_t i = 0; i < n; ++i) {
+      if (msg_names[i] != expected_joints[i]) {
+        return false;
+      }
+    }
+  }
+  for (double p : msg_positions) {
+    if (!std::isfinite(p)) {
+      return false;
+    }
+  }
+  if (!msg_velocities.empty()) {
+    if (msg_velocities.size() != n) {
+      return false;
+    }
+    for (double v : msg_velocities) {
+      if (!std::isfinite(v)) {
+        return false;
+      }
+    }
+    qdot_d_out = msg_velocities;
+  } else {
+    qdot_d_out.clear();
+  }
+  q_d_out = msg_positions;
   return true;
 }
 

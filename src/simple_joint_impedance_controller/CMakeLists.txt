@@ -19,6 +19,7 @@ find_package(pluginlib REQUIRED)
 find_package(realtime_tools REQUIRED)
 find_package(generate_parameter_library REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(urdf REQUIRED)
 
 generate_parameter_library(
   simple_joint_impedance_controller_parameters
@@ -49,6 +50,7 @@ ament_target_dependencies(${PROJECT_NAME}
     pluginlib
     realtime_tools
     sensor_msgs
+    urdf
 )
 
 pluginlib_export_plugin_description_file(
@@ -74,6 +76,7 @@ ament_export_dependencies(
   realtime_tools
   generate_parameter_library
   sensor_msgs
+  urdf
 )
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
 

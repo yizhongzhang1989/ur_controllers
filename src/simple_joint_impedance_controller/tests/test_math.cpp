@@ -1,4 +1,6 @@
 #include <cmath>
+#include <limits>
+#include <string>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -10,6 +12,7 @@ using simple_joint_impedance_controller::clamp_to_limits;
 using simple_joint_impedance_controller::compute_pd_torque;
 using simple_joint_impedance_controller::saturate_torque_abs;
 using simple_joint_impedance_controller::saturate_torque_rate;
+using simple_joint_impedance_controller::validate_target_joint_state;
 
 namespace
 {
@@ -157,6 +160,90 @@ TEST(SaturateTorqueAbs, RejectsNegativeLimit)
   std::vector<double> tau{0.0};
   const std::vector<double> tau_max{-1.0};
   EXPECT_FALSE(saturate_torque_abs(tau, tau_max));
+}
+
+TEST(ValidateTargetJointState, AcceptsPositionOnlyWithoutNames)
+{
+  const std::vector<std::string> names;
+  const std::vector<double> pos{0.1, -0.2, 0.3};
+  const std::vector<double> vel;
+  const std::vector<std::string> expected{"a", "b", "c"};
+  std::vector<double> q_d, qdot_d;
+  ASSERT_TRUE(validate_target_joint_state(names, pos, vel, expected, q_d, qdot_d));
+  EXPECT_EQ(q_d, pos);
+  EXPECT_TRUE(qdot_d.empty());
+}
+
+TEST(ValidateTargetJointState, AcceptsPositionAndVelocity)
+{
+  const std::vector<std::string> names{"a", "b"};
+  const std::vector<double> pos{0.0, 1.0};
+  const std::vector<double> vel{0.5, -0.5};
+  const std::vector<std::string> expected{"a", "b"};
+  std::vector<double> q_d, qdot_d;
+  ASSERT_TRUE(validate_target_joint_state(names, pos, vel, expected, q_d, qdot_d));
+  EXPECT_EQ(q_d, pos);
+  EXPECT_EQ(qdot_d, vel);
+}
+
+TEST(ValidateTargetJointState, RejectsNameReorder)
+{
+  const std::vector<std::string> names{"b", "a"};
+  const std::vector<double> pos{0.0, 1.0};
+  const std::vector<double> vel;
+  const std::vector<std::string> expected{"a", "b"};
+  std::vector<double> q_d, qdot_d;
+  EXPECT_FALSE(validate_target_joint_state(names, pos, vel, expected, q_d, qdot_d));
+}
+
+TEST(ValidateTargetJointState, RejectsPositionLengthMismatch)
+{
+  const std::vector<std::string> names;
+  const std::vector<double> pos{0.0};
+  const std::vector<double> vel;
+  const std::vector<std::string> expected{"a", "b"};
+  std::vector<double> q_d, qdot_d;
+  EXPECT_FALSE(validate_target_joint_state(names, pos, vel, expected, q_d, qdot_d));
+}
+
+TEST(ValidateTargetJointState, RejectsVelocityLengthMismatch)
+{
+  const std::vector<std::string> names;
+  const std::vector<double> pos{0.0, 0.0};
+  const std::vector<double> vel{0.1};
+  const std::vector<std::string> expected{"a", "b"};
+  std::vector<double> q_d, qdot_d;
+  EXPECT_FALSE(validate_target_joint_state(names, pos, vel, expected, q_d, qdot_d));
+}
+
+TEST(ValidateTargetJointState, RejectsNonFinitePosition)
+{
+  const std::vector<std::string> names;
+  const std::vector<double> pos{0.0, std::numeric_limits<double>::quiet_NaN()};
+  const std::vector<double> vel;
+  const std::vector<std::string> expected{"a", "b"};
+  std::vector<double> q_d, qdot_d;
+  EXPECT_FALSE(validate_target_joint_state(names, pos, vel, expected, q_d, qdot_d));
+}
+
+TEST(ValidateTargetJointState, RejectsNonFiniteVelocity)
+{
+  const std::vector<std::string> names;
+  const std::vector<double> pos{0.0, 0.0};
+  const std::vector<double> vel{0.0, std::numeric_limits<double>::infinity()};
+  const std::vector<std::string> expected{"a", "b"};
+  std::vector<double> q_d, qdot_d;
+  EXPECT_FALSE(validate_target_joint_state(names, pos, vel, expected, q_d, qdot_d));
+}
+
+TEST(ValidateTargetJointState, RejectsEmptyExpectedJoints)
+{
+  const std::vector<std::string> names;
+  const std::vector<double> pos;
+  const std::vector<double> vel;
+  const std::vector<std::string> expected;
+  std::vector<double> q_d, qdot_d;
+  EXPECT_FALSE(validate_target_joint_state(names, pos, vel, expected, q_d, qdot_d));
 }
 
 int main(int argc, char ** argv)
