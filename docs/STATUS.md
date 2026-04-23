@@ -1,12 +1,12 @@
 # Status
 
-_Last updated: 2026-04-23 (M3: created `src/simple_joint_impedance_controller/`
-package skeleton — pluginlib-loadable `ControllerInterface` plugin with
-`generate_parameter_library` schema (ADR-0008 keep-list), header-only
-math helpers (`math.hpp`), and 14 gtest unit tests on the PD + saturation
-+ clamp math. Also fixed `scripts/run_tests.sh` stage 2 to pass
-`--packages-skip cartesian_controller_simulation cartesian_controller_tests`,
-matching ADR-0005. Next: flesh out `update()` control-law wiring.)_
+_Last updated: 2026-04-23 (fix: strictly serialise MuJoCo sim
+controller spawners in `third_party/ur_simulator` — previous
+JSB-only serialisation still raced the remaining 5 spawners under
+Humble+FastRTPS, causing `forward_effort_controller` to stay
+`unconfigured` and the crisp joint impedance `[ur5e]` integration
+test to time out on its sim_ready gate. Now chained strictly
+one-after-another. `scripts/run_tests.sh` green again in ~4:10.)_
 
 ## Current milestone
 
@@ -29,6 +29,17 @@ scope.
 
 ## Last completed tasks
 
+- **Fix: strictly serialise MuJoCo controller spawners
+  (`third_party/ur_simulator`).** `ur_sim_mujoco.launch.py` previously
+  fired 5 post-JSB spawners as one `OnProcessExit` batch. Under
+  Humble+FastRTPS the concurrent `load_controller` service calls
+  overflowed the RMW response queue; the CM's reply to one spawner
+  was silently dropped, that spawner retried 10 s later and crashed
+  on "controller already loaded". Symptom: `forward_effort_controller`
+  stuck in `unconfigured`, `test_crisp_joint_impedance_regulation[ur5e]`
+  timed out on sim_ready. Fix: chain each spawner off the previous
+  spawner's `OnProcessExit` so at most one `load_controller` call is
+  ever in flight. Deterministic, adds ~5 s to sim startup.
 - **M3 — `simple_joint_impedance_controller` package skeleton.** Ninth
   package in the workspace; builds cleanly via the standard
   `colcon build --packages-skip cartesian_controller_simulation
