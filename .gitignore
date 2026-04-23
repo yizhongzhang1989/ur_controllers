@@ -26,6 +26,7 @@ evaluation/baselines/*.mcap
 evaluation/baselines/**/*.bag/
 evaluation/baselines/**/*.mcap/
 evaluation/reports/
+evaluation/runs/
 
 # Agent loop control
 .STOP
