@@ -31,7 +31,12 @@ Cross-cutting rules:
   - [x] `ur_simulator` — https://github.com/yizhongzhang1989/ur_simulator.git (tracking `auto_dev`)
   - [x] `crisp_controllers` — https://github.com/yizhongzhang1989/crisp_controllers.git (read-only)
   - [x] `cartesian_controllers` — https://github.com/yizhongzhang1989/cartesian_controllers.git (read-only)
-- [ ] Add top-level colcon workspace config (symlinks or `COLCON_IGNORE` markers).
+- [x] Add top-level colcon workspace config (symlinks or `COLCON_IGNORE` markers).
+      Done as `colcon_defaults.yaml` at the repo root — auto-loaded by
+      `python3-colcon-defaults` from cwd, supplies `--symlink-install`,
+      `--base-paths src third_party`, and the ADR-0005 `--packages-skip`
+      list for both `build` and `test` verbs. Pinned by
+      `tests/unit/test_colcon_defaults.py`.
 - [ ] Add `.pre-commit-config.yaml` (clang-format, ruff, trailing whitespace).
 - [ ] Add CI workflow `.github/workflows/ci.yml`: build + unit tests headless.
 - [ ] Write `scripts/setup_env.sh` to install ROS deps via `rosdep`.

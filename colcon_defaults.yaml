@@ -1,0 +1,31 @@
+# Workspace-level colcon defaults.
+#
+# The python3-colcon-defaults extension auto-loads this file when colcon is
+# invoked from this directory (no env var or flag required). It encodes the
+# standard build flags for this workspace so `colcon build` / `colcon test`
+# from the repo root inherit:
+#
+#   * --symlink-install
+#   * --base-paths src third_party        (workspace boundary)
+#   * --packages-skip cartesian_controller_simulation cartesian_controller_tests
+#     (see ADR-0005 in docs/DECISIONS.md)
+#
+# Top-level keys are colcon verbs; nested keys are the long-form CLI options
+# with `--` stripped and `_` replaced by `-`.
+#
+# These are *defaults* — explicit CLI flags still override them, so existing
+# scripts that pass `--packages-skip ...` keep working unchanged.
+
+build:
+  symlink-install: true
+  base-paths:
+    - src
+    - third_party
+  packages-skip:
+    - cartesian_controller_simulation
+    - cartesian_controller_tests
+
+test:
+  packages-skip:
+    - cartesian_controller_simulation
+    - cartesian_controller_tests

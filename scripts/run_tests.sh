@@ -69,7 +69,9 @@ say "stage 2: colcon test"
 if command -v colcon >/dev/null 2>&1 && compgen -G "src/*/package.xml" >/dev/null; then
     if [[ -d build && -d install ]]; then
         ran_any=1
-        if ! run_or_dry colcon test --event-handlers console_direct+ --return-code-on-test-failure --packages-skip cartesian_controller_simulation cartesian_controller_tests; then
+        # packages-skip comes from colcon_defaults.yaml at the repo root
+        # (loaded automatically by python3-colcon-defaults). See ADR-0005.
+        if ! run_or_dry colcon test --event-handlers console_direct+ --return-code-on-test-failure; then
             say "colcon test FAILED"
             fail=1
         fi

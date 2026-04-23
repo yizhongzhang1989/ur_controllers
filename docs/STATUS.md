@@ -1,18 +1,74 @@
 # Status
 
-_Last updated: 2026-04-23 (feat(m5): comparison report driver
-`evaluation/compare.py` wrapping bullets 2 + 3 with CSV + Markdown
-output under `evaluation/reports/<UTC-ts>/`, 15 new unit tests. Full
-test gate green in ~6:30.)_
+_Last updated: 2026-04-23 (build(m0): top-level `colcon_defaults.yaml`
+auto-loaded by `python3-colcon-defaults` — supplies `--symlink-install`,
+`--base-paths src third_party`, and the ADR-0005 `--packages-skip` list
+for both `build` and `test` verbs; `scripts/run_tests.sh` and the README
+quickstart simplified to bare `colcon`/`colcon test`. Pinned by 6 new
+unit tests in `tests/unit/test_colcon_defaults.py`. Full test gate green
+in ~6:00.)_
 
 ## Current milestone
 
-**M5 — evaluation and comparison harness: DONE for the M5 scope we can
-reach without hardware.** M0–M4 done (with M4 bullet 5 still parked
-behind a human gate for the sim F/T sensor patch). M5 bullets 1–4 are
-all ticked. Next milestone is either M4 bullet 5 (cartesian second
-mode, human-gated) or M-REAL (explicitly out-of-scope until operator
-approval).
+**M0 — bootstrap: still has 3 unchecked items** (`.pre-commit-config.yaml`,
+CI workflow, `scripts/setup_env.sh`). Per ROADMAP rule "agent works on
+the earliest milestone that has unchecked items", M0 has priority again
+even though M2–M5 already landed. M0's first unchecked bullet (top-level
+colcon workspace config) was closed this iteration.
+
+M2–M4 done (with M4 bullet 5 still parked behind a human gate for the
+sim F/T sensor patch). M5 bullets 1–4 are all ticked. M-REAL is
+explicitly out-of-scope until operator approval.
+
+This iteration tackled M0 bullet 1 (top-level colcon workspace config).
+Approach:
+
+1. Created `colcon_defaults.yaml` at the repo root. The
+   `python3-colcon-defaults` extension auto-loads `colcon_defaults.yaml`
+   from cwd (no env var, no `--metas` flag) and merges its content into
+   the verb-level defaults. Top-level keys are colcon verbs; nested keys
+   are CLI options with `--` stripped and `_` replaced by `-`.
+2. Encoded the standard build flags so a bare `colcon build` /
+   `colcon test` invoked from the repo root inherits
+   `--symlink-install`, `--base-paths src third_party`, and the
+   ADR-0005 `--packages-skip` list. Verified the file is loaded by
+   running `colcon build --dry-run` with `COLCON_LOG_LEVEL=info`:
+   `INFO: Using configuration from
+   '.../colcon_defaults.yaml' ... Setting default values for parser
+   'build': {symlink_install, base_paths, packages_skip}`.
+3. Removed the now-redundant `--packages-skip ...` flag from
+   `scripts/run_tests.sh` (the defaults file supplies it; explicit
+   flags still override, so external callers are unaffected).
+4. Simplified the README quickstart from
+   `colcon build --symlink-install --base-paths src third_party
+   --packages-skip cartesian_controller_simulation cartesian_controller_tests`
+   down to `colcon build`, with a short note that the defaults file
+   provides the rest. Added a "Why some packages are skipped" link to
+   the new file.
+5. Added `tests/unit/test_colcon_defaults.py` (6 cases): YAML loads;
+   `build` and `test` sections both present; `build.symlink-install`
+   is `true`; `build.base-paths == [src, third_party]`; both verbs
+   skip the ADR-0005 packages; no unknown top-level verbs (guard
+   against typos like `built:` silently no-op'ing).
+
+Key non-obvious points:
+
+- **No env var or CLI flag is needed.** The plugin checks for
+  `colcon_defaults.yaml` in the current working directory after merging
+  `$COLCON_DEFAULTS_FILE` / `$COLCON_HOME/defaults.yaml` (see the
+  `colcon-defaults` source in `/usr/lib/python3/dist-packages/`). Local
+  workspace defaults override global ones.
+- **Defaults, not overrides.** Explicit `--packages-skip ...` on the
+  CLI still wins. AGENTS.md §4 still says "always pass `--packages-skip
+  ...`"; that contract is unchanged — we just don't have to type it
+  any more when invoking from the repo root. The skip list is now
+  defined in exactly one place that other docs can link to.
+- **`COLCON_IGNORE` markers were considered and rejected.** The two
+  skipped packages live under `third_party/cartesian_controllers/`,
+  which is a read-only submodule per ADR-0003 — we cannot place
+  marker files inside it without dirtying the submodule. The defaults
+  file keeps the workspace tree clean and the third_party submodules
+  untouched.
 
 M5 bullet 4 landed this iteration as `evaluation/compare.py` plus 15
 new unit tests in `tests/unit/test_compare.py`. The driver:
@@ -98,16 +154,17 @@ Key decisions this iteration (see ADR-0011):
 
 ## Last completed tasks
 
-- **M5 bullet 4: `evaluation/compare.py`.** New files:
-  `evaluation/compare.py` (aggregate-only driver),
-  `tests/unit/test_compare.py` (15 cases covering combo enumeration,
-  latest-valid run-dir lookup, synthetic run-dir aggregation, CSV +
-  Markdown emission, and CLI exit codes). No changes to
-  `run_evaluation.py` or `compute_metrics.py` — the driver imports
-  both via file-based `importlib` so the existing modules stay
-  stable. `docs/ROADMAP.md` M5 bullet 4 ticked. `docs/DECISIONS.md`
-  gets ADR-0011 (aggregate-only, latest-valid, report-layer cartesian
-  status).
+- **M0 bullet 1: top-level colcon workspace config.** New
+  `colcon_defaults.yaml` at the repo root encodes
+  `--symlink-install`, `--base-paths src third_party`, and the
+  ADR-0005 `--packages-skip` list for both `build` and `test`. Loaded
+  automatically by `python3-colcon-defaults` when colcon is invoked
+  from the repo root. `scripts/run_tests.sh` and the README quickstart
+  drop the redundant `--packages-skip` flag. New unit test
+  `tests/unit/test_colcon_defaults.py` (6 cases) pins the structure
+  so a future edit can't silently drop the skip list, base paths, or
+  symlink-install. ROADMAP M0 bullet 1 ticked.
+- **M5 bullet 4: `evaluation/compare.py`.** See prior STATUS.
 - **M5 bullet 3: `evaluation/compute_metrics.py`.** See prior STATUS.
 - **M5 bullet 2: `evaluation/run_evaluation.py`.** See prior STATUS.
 - **M5 bullet 1: `evaluation/scenarios/*.yaml` schema v1.** See prior STATUS.
@@ -121,10 +178,25 @@ Key decisions this iteration (see ADR-0011):
 
 ## Next task (agent should pick this up)
 
-**M5 bullet 4 is done; M5 is closed for the scope we can reach
-without new hardware / new simulator work.** The two remaining
-roadmap items are both **human-gated** and must not be entered
-autonomously:
+**M0 still has 3 unchecked bullets**, in order:
+
+1. `.pre-commit-config.yaml` (clang-format, ruff, trailing whitespace).
+   Cheap and self-contained — pick this up first. Add the config and a
+   smoke test that `pre-commit run --all-files` exits 0 against the
+   current tree (or document any pre-existing violations as
+   intentional and fix them in the same iteration).
+2. CI workflow `.github/workflows/ci.yml`: build + unit tests
+   headless. Should source ROS Humble, run
+   `colcon build` (defaults file now supplies the flags), then
+   `scripts/run_tests.sh --unit-only` (integration tests need a
+   running sim — defer until a sim-in-CI story lands).
+3. `scripts/setup_env.sh`: thin wrapper around `apt`/`rosdep` to
+   install the prerequisites listed in README.md "Prerequisites".
+   Idempotent; safe to re-run. Add a `--dry-run` mode mirroring
+   `scripts/run_tests.sh`.
+
+After M0 is fully ticked, the only remaining roadmap items are
+**human-gated**:
 
 - **M4 bullet 5** — second cartesian mode. Still gated on the sim
   F/T sensor patch on `third_party/ur_simulator`'s `auto_dev`
@@ -146,34 +218,30 @@ Suggested follow-ups (not blocking the outer loop but useful):
   `pinocchio` (already pulled in by crisp) or `tf2_ros` transform
   lookups during the run.
 
-The outer loop should treat the current green test gate as a good
-stopping point and wait for operator direction; two consecutive
-agent iterations with no meaningful unchecked work would otherwise
-trip the "no-progress" stop condition (AGENTS.md §8).
-
 ## Build status
 
 - ROS 2 distro: **Humble** (Ubuntu 22.04, matches system install).
-- `colcon build --symlink-install --base-paths src third_party
-  --packages-skip cartesian_controller_simulation cartesian_controller_tests`
-  produces **10** packages successfully, unchanged from prior
-  iteration (no new ROS packages added — this iteration only touched
-  `evaluation/` and `tests/unit/`).
+- `colcon build` (from the repo root, picking up
+  `colcon_defaults.yaml`) produces **10** packages successfully,
+  unchanged from prior iteration (no new ROS packages added — this
+  iteration only added a workspace-level config file, edited
+  `scripts/run_tests.sh`, the README, ROADMAP, and added one unit
+  test).
 
 ## Test status
 
 - `scripts/run_tests.sh` runs unit → colcon test → integration. Green
-  in ~6:30 this iteration (35 schema + 34 runner-dry-run + 32
-  metrics + **15 new compare** unit tests, 27 colcon gtests, 12
-  integration tests).
-- Test counts: **116** pytest unit tests
+  in ~6:00 this iteration (35 schema + 34 runner-dry-run + 32
+  metrics + 15 compare + **6 new colcon-defaults** unit tests, 27
+  colcon gtests, 12 integration tests).
+- Test counts: **122** pytest unit tests
   (`tests/unit/test_scenarios_schema.py` +
   `test_run_evaluation_dry.py` + `test_compute_metrics.py` +
-  `test_compare.py`) + **22** `test_math` gtests
-  (simple_joint_impedance_controller) + **5** `crisp_controllers`
-  gtests + **12** integration tests (sim smoke + 3 crisp roles +
-  our simple_joint_impedance_controller + `cartesian_motion_controller`,
-  each ×{ur5e, ur15}).
+  `test_compare.py` + `test_colcon_defaults.py`) + **22** `test_math`
+  gtests (simple_joint_impedance_controller) + **5**
+  `crisp_controllers` gtests + **12** integration tests (sim smoke +
+  3 crisp roles + our simple_joint_impedance_controller +
+  `cartesian_motion_controller`, each ×{ur5e, ur15}).
 
 ## Blockers / open questions for operator
 

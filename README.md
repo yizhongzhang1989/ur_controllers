@@ -56,11 +56,11 @@ git clone --recurse-submodules <this repo>
 cd ur_controllers
 git submodule update --init --recursive
 
-# 2. Install rosdeps and build.
+# 2. Install rosdeps and build. From the repo root, `colcon_defaults.yaml`
+#    auto-supplies --symlink-install, --base-paths and --packages-skip.
 source /opt/ros/humble/setup.bash
 rosdep install --from-paths src third_party --ignore-src -r -y
-colcon build --symlink-install --base-paths src third_party \
-  --packages-skip cartesian_controller_simulation cartesian_controller_tests
+colcon build
 
 # 3. Launch the simulator with a chosen arm.
 scripts/launch_sim.sh ur5e effort   # or: scripts/launch_sim.sh ur15 effort
@@ -75,6 +75,10 @@ controller command torques. Use `scripts/launch_sim.sh ur5e position` for
 trajectory-based control.
 
 ## Why some packages are skipped
+
+The skip list lives in [`colcon_defaults.yaml`](colcon_defaults.yaml) at
+the repo root and is loaded automatically by `colcon` when invoked from
+this directory (via the `python3-colcon-defaults` plugin).
 
 - `cartesian_controller_simulation` — needs the MuJoCo C library at
   `/home/robot/mujoco-3.0.0`. We use `ur_simulator` for simulation instead.
