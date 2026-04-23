@@ -47,9 +47,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 LAUNCH_SIM = REPO_ROOT / "scripts" / "launch_sim.sh"
 KILL_SIM = REPO_ROOT / "scripts" / "kill_sim.sh"
 INSTALL_SETUP = REPO_ROOT / "install" / "setup.bash"
-BRINGUP_LAUNCH = (
-    REPO_ROOT / "bringup" / "launch" / "simple_jimp_bringup.launch.py"
-)
+BRINGUP_LAUNCH = REPO_ROOT / "bringup" / "launch" / "simple_jimp_bringup.launch.py"
 
 CONTROLLER_NAME = "simple_joint_impedance_controller"
 TARGET_TOPIC = f"/{CONTROLLER_NAME}/target_joint"
@@ -104,11 +102,7 @@ _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 
 def _bash(cmd: str, timeout: float = 30.0) -> subprocess.CompletedProcess:
-    full = (
-        "source /opt/ros/humble/setup.bash && "
-        f"source {INSTALL_SETUP} && "
-        f"{cmd}"
-    )
+    full = "source /opt/ros/humble/setup.bash && " f"source {INSTALL_SETUP} && " f"{cmd}"
     return subprocess.run(
         ["bash", "-c", full],
         capture_output=True,
@@ -148,7 +142,7 @@ def _joint_state_positions() -> dict[str, float] | None:
         line = raw.rstrip()
         stripped = line.strip()
         if stripped.startswith("name:"):
-            rest = stripped[len("name:"):].strip()
+            rest = stripped[len("name:") :].strip()
             if rest.startswith("[") and rest.endswith("]"):
                 names = [n.strip().strip("'\"") for n in rest[1:-1].split(",") if n.strip()]
                 current_list = None
@@ -157,7 +151,7 @@ def _joint_state_positions() -> dict[str, float] | None:
                 current_list = names
             continue
         if stripped.startswith("position:"):
-            rest = stripped[len("position:"):].strip()
+            rest = stripped[len("position:") :].strip()
             if rest.startswith("[") and rest.endswith("]"):
                 positions = [float(x) for x in rest[1:-1].split(",") if x.strip()]
                 current_list = None
@@ -198,9 +192,7 @@ def _collect_joint_state_samples(duration_s: float) -> list[dict[str, float]]:
 
     def _cb(msg) -> None:
         if msg.name and len(msg.name) == len(msg.position):
-            samples.append(
-                {n: float(p) for n, p in zip(msg.name, msg.position)}
-            )
+            samples.append({n: float(p) for n, p in zip(msg.name, msg.position)})
 
     node.create_subscription(JointState, "/joint_states", _cb, 10)
     try:
@@ -270,11 +262,10 @@ def simple_jimp_up(request):
     sim_log = log_dir / f"simple_jimp_sim_{robot}.log"
     bringup_log = log_dir / f"simple_jimp_bringup_{robot}.log"
 
-    sim_proc = _spawn_in_pgid(
-        ["bash", str(LAUNCH_SIM), robot, "effort"], sim_log
-    )
+    sim_proc = _spawn_in_pgid(["bash", str(LAUNCH_SIM), robot, "effort"], sim_log)
     bringup_proc: subprocess.Popen | None = None
     try:
+
         def sim_ready() -> bool:
             states = _controller_states()
             return (
@@ -321,7 +312,7 @@ def _publish_target_joint_bg(
             "source /opt/ros/humble/setup.bash && "
             f"source {INSTALL_SETUP} && "
             f"ros2 topic pub --rate 20 {TARGET_TOPIC} sensor_msgs/msg/JointState "
-            f"\"{msg}\""
+            f'"{msg}"'
         ),
     ]
     return _spawn_in_pgid(argv, log_path)

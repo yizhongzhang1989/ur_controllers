@@ -37,7 +37,13 @@ Cross-cutting rules:
       `--base-paths src third_party`, and the ADR-0005 `--packages-skip`
       list for both `build` and `test` verbs. Pinned by
       `tests/unit/test_colcon_defaults.py`.
-- [ ] Add `.pre-commit-config.yaml` (clang-format, ruff, trailing whitespace).
+- [x] Add `.pre-commit-config.yaml` (clang-format, ruff, trailing whitespace).
+      Landed as `.pre-commit-config.yaml` + `.clang-format` (LLVM base) +
+      `ruff.toml` (py310 target). Hook revs are pinned; `third_party/`,
+      `build/`, `install/`, `log/` and the gitignored evaluation outputs
+      are excluded. Tree was brought into compliance in the same commit
+      (`pre-commit run --all-files` exits 0). Pinned by 12 unit tests in
+      `tests/unit/test_pre_commit_config.py`.
 - [ ] Add CI workflow `.github/workflows/ci.yml`: build + unit tests headless.
 - [ ] Write `scripts/setup_env.sh` to install ROS deps via `rosdep`.
 

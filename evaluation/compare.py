@@ -71,9 +71,7 @@ def _load_module(name: str, path: Path):
 
 _RUN = _load_module("_evaluation_run", EVAL_DIR / "run_evaluation.py")
 _METRICS = _load_module("_evaluation_compute_metrics", EVAL_DIR / "compute_metrics.py")
-_VALIDATE = _load_module(
-    "_evaluation_scenario_validate_compare", SCENARIO_DIR / "validate.py"
-)
+_VALIDATE = _load_module("_evaluation_scenario_validate_compare", SCENARIO_DIR / "validate.py")
 
 
 # ---------------------------------------------------------------------------
@@ -112,9 +110,7 @@ class IncompatibleCombo:
 def load_scenario(path: Path) -> dict:
     errs = _VALIDATE.validate_file(path)
     if errs:
-        raise ValueError(
-            f"{path}: invalid scenario\n  - " + "\n  - ".join(errs)
-        )
+        raise ValueError(f"{path}: invalid scenario\n  - " + "\n  - ".join(errs))
     with path.open("r", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
@@ -154,8 +150,7 @@ def enumerate_combos(
                 reasons: list[str] = []
                 if robot not in scen_robots:
                     reasons.append(
-                        f"robot {robot!r} not listed in scenario.robots "
-                        f"({scen_robots})"
+                        f"robot {robot!r} not listed in scenario.robots " f"({scen_robots})"
                     )
                 reasons.extend(compat_errs)
                 if reasons:
@@ -218,9 +213,7 @@ def find_latest_run_dir(
 _REPORT_METRICS = ("rmse", "settling_time", "overshoot", "control_effort")
 
 
-def _row_from_payload(
-    combo: Combo, run_dir: Path, payload: dict
-) -> RowResult:
+def _row_from_payload(combo: Combo, run_dir: Path, payload: dict) -> RowResult:
     target_space = payload.get("target_space") or combo.target_space
     if target_space == "cartesian":
         status = "not_yet_evaluated"
@@ -252,9 +245,7 @@ def _row_from_payload(
 def process_combo(combo: Combo, runs_root: Path) -> RowResult:
     """Find the combo's run dir, compute metrics (caching artefacts), and
     return a :class:`RowResult` summarising it."""
-    run_dir = find_latest_run_dir(
-        runs_root, combo.scenario_name, combo.controller, combo.robot
-    )
+    run_dir = find_latest_run_dir(runs_root, combo.scenario_name, combo.controller, combo.robot)
     if run_dir is None:
         # Cartesian combos without a run are still surfaced as
         # "not_yet_evaluated" so the report reads consistently — they
@@ -379,6 +370,7 @@ def write_report_csv(
     path: Path, rows: list[RowResult], incompatibles: list[IncompatibleCombo]
 ) -> None:
     import csv as _csv
+
     lines: list[list[str]] = [list(_REPORT_CSV_HEADER)]
     for r in rows:
         lines.append(_compatible_row(r))
@@ -413,17 +405,14 @@ def write_report_markdown(
     summary_bits = ", ".join(f"{k}={v}" for k, v in counts.items() if v)
     out.append(f"Status summary: {summary_bits or 'empty'}.")
     out.append("")
-    out.append("| scenario | type | space | controller | robot | status | rmse (rad) | settle (s) | overshoot (%) | effort (N·m) | run_dir |")
+    out.append(
+        "| scenario | type | space | controller | robot | status | rmse (rad) | settle (s) | overshoot (%) | effort (N·m) | run_dir |"
+    )
     out.append("|---|---|---|---|---|---|---|---|---|---|---|")
     for r in rows:
         cells = _compatible_row(r)
         out.append(
-            "| "
-            + " | ".join(
-                _md_cell(cells[i])
-                for i in (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
-            )
-            + " |"
+            "| " + " | ".join(_md_cell(cells[i]) for i in (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10)) + " |"
         )
     if incompatibles:
         out.append("")
@@ -517,8 +506,7 @@ def overall_exit_code(rows: list[RowResult]) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description=(
-            "Aggregate evaluation run directories into a comparison "
-            "report (M5 bullet 4)."
+            "Aggregate evaluation run directories into a comparison " "report (M5 bullet 4)."
         )
     )
     parser.add_argument(
@@ -526,10 +514,7 @@ def main(argv: list[str] | None = None) -> int:
         nargs="+",
         type=Path,
         default=None,
-        help=(
-            "Scenario YAML files to include (default: every "
-            "evaluation/scenarios/*.yaml)."
-        ),
+        help=("Scenario YAML files to include (default: every " "evaluation/scenarios/*.yaml)."),
     )
     parser.add_argument(
         "--controllers",
@@ -567,8 +552,7 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         default=True,
         help=(
-            "Only aggregate existing run dirs (default; live dispatch "
-            "is not implemented yet)."
+            "Only aggregate existing run dirs (default; live dispatch " "is not implemented yet)."
         ),
     )
     args = parser.parse_args(argv)
@@ -582,14 +566,11 @@ def main(argv: list[str] | None = None) -> int:
             print(f"compare: scenario not found: {p}", file=sys.stderr)
             return 2
 
-    controllers = (
-        list(args.controllers) if args.controllers else _RUN.known_controllers()
-    )
+    controllers = list(args.controllers) if args.controllers else _RUN.known_controllers()
     unknown = [c for c in controllers if c not in _RUN.known_controllers()]
     if unknown:
         print(
-            f"compare: unknown controller(s): {unknown}; known: "
-            f"{_RUN.known_controllers()}",
+            f"compare: unknown controller(s): {unknown}; known: " f"{_RUN.known_controllers()}",
             file=sys.stderr,
         )
         return 2

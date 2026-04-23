@@ -22,7 +22,6 @@ import importlib.util
 import math
 import subprocess
 import sys
-import textwrap
 from pathlib import Path
 
 import pytest
@@ -152,9 +151,7 @@ def test_settling_time_immediate_when_already_inside_band():
     target_post = {"j": 1.0}
     observed = {"j": [0.0, 1.0, 1.0, 1.0]}
     amp = {"j": 1.0}
-    out = CM.settling_time_per_joint(
-        times, target_post, observed, amp, step_time_s=0.1
-    )
+    out = CM.settling_time_per_joint(times, target_post, observed, amp, step_time_s=0.1)
     assert out["j"] == pytest.approx(0.0)
 
 
@@ -164,9 +161,7 @@ def test_settling_time_inf_when_never_settles():
     # Observed is always 0.4 off (well above the 5% * 1.0 = 0.05 tolerance).
     observed = {"j": [0.0, 0.6, 0.6, 0.6]}
     amp = {"j": 1.0}
-    out = CM.settling_time_per_joint(
-        times, target_post, observed, amp, step_time_s=0.0
-    )
+    out = CM.settling_time_per_joint(times, target_post, observed, amp, step_time_s=0.0)
     assert math.isinf(out["j"])
 
 
@@ -184,9 +179,7 @@ def test_settling_time_reports_recovery_time():
     target_post = {"j": 1.0}
     observed = {"j": [0.0, 1.0, 1.0, 1.0, 0.7, 1.0, 1.0]}  # excursion at 0.4
     amp = {"j": 1.0}
-    out = CM.settling_time_per_joint(
-        times, target_post, observed, amp, step_time_s=0.0
-    )
+    out = CM.settling_time_per_joint(times, target_post, observed, amp, step_time_s=0.0)
     # Last excursion is at index 4 (t=0.4). Settled at index 5 (t=0.5).
     assert out["j"] == pytest.approx(0.5)
 
@@ -221,9 +214,7 @@ def test_overshoot_no_overshoot_returns_zero():
 
 def test_overshoot_zero_amplitude_returns_zero():
     times = [0.0, 0.1]
-    out = CM.overshoot_per_joint(
-        times, {"j": 1.0}, {"j": 1.0}, {"j": [1.0, 1.5]}, step_time_s=0.0
-    )
+    out = CM.overshoot_per_joint(times, {"j": 1.0}, {"j": 1.0}, {"j": [1.0, 1.5]}, step_time_s=0.0)
     assert out["j"] == 0.0
 
 
@@ -472,9 +463,7 @@ def test_step_overshoot_threshold_can_fail(tmp_path):
     amp = [0.0, 0.1, 0.0, 0.0, 0.0, 0.0]
     target_rows = []
     for t in times:
-        target_rows.append(
-            [t, *(q0[i] + (amp[i] if t >= step_time_s else 0.0) for i in range(6))]
-        )
+        target_rows.append([t, *(q0[i] + (amp[i] if t >= step_time_s else 0.0) for i in range(6))])
     # 50% overshoot on shoulder_lift -> exceeds 25% threshold.
     observed_rows = []
     for t in times:
@@ -577,9 +566,7 @@ def test_control_effort_skipped_when_no_tau_d_csv(tmp_path):
     assert rc == 0
     payload = yaml.safe_load((run_dir / "metrics.yaml").read_text())
     assert payload["metrics"]["control_effort"]["status"] == "skipped"
-    pr = next(
-        p for p in payload["pass_results"] if p["key"] == "max_control_effort_nm"
-    )
+    pr = next(p for p in payload["pass_results"] if p["key"] == "max_control_effort_nm")
     assert pr["status"] == "skipped"
 
 
@@ -672,9 +659,7 @@ def test_compute_metrics_for_run_inf_settling_propagates(tmp_path):
     step_time_s = 0.1
     target_rows = []
     for t in times:
-        target_rows.append(
-            [t, *(q0[i] + (amp[i] if t >= step_time_s else 0.0) for i in range(6))]
-        )
+        target_rows.append([t, *(q0[i] + (amp[i] if t >= step_time_s else 0.0) for i in range(6))])
     # Joint never settles within the 5%-of-amplitude band.
     observed_rows = []
     for t in times:

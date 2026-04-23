@@ -26,7 +26,6 @@ import re
 import signal
 import socket
 import subprocess
-import sys
 import time
 import urllib.error
 import urllib.request
@@ -81,11 +80,7 @@ pytestmark = pytest.mark.skipif(
 
 def _bash(cmd: str, timeout: float = 30.0) -> subprocess.CompletedProcess:
     """Run `cmd` under bash with ROS and our workspace sourced."""
-    full = (
-        "source /opt/ros/humble/setup.bash && "
-        f"source {INSTALL_SETUP} && "
-        f"{cmd}"
-    )
+    full = "source /opt/ros/humble/setup.bash && " f"source {INSTALL_SETUP} && " f"{cmd}"
     return subprocess.run(
         ["bash", "-c", full],
         capture_output=True,
@@ -124,7 +119,7 @@ def _joint_state_fields() -> set[str] | None:
         s = line.strip()
         if s.startswith("name:"):
             # Inline form: `name: [a, b, c]`
-            rest = s[len("name:"):].strip()
+            rest = s[len("name:") :].strip()
             if rest.startswith("[") and rest.endswith("]"):
                 return {n.strip().strip("'\"") for n in rest[1:-1].split(",") if n.strip()}
             capture = True
@@ -253,9 +248,9 @@ def test_sim_bringup(sim_up):
     )
 
     # 3. rosbridge WebSocket port must be open.
-    assert _wait_until(lambda: _port_open(ROSBRIDGE_PORT), 30.0), (
-        f"rosbridge port {ROSBRIDGE_PORT} not open for {robot}. See {log_path}."
-    )
+    assert _wait_until(
+        lambda: _port_open(ROSBRIDGE_PORT), 30.0
+    ), f"rosbridge port {ROSBRIDGE_PORT} not open for {robot}. See {log_path}."
 
     # 4. Dashboard HTTP must respond 200.
     assert _wait_until(

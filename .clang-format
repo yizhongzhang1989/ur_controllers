@@ -1,0 +1,13 @@
+# Repository-wide C++ formatting style for ur_controllers.
+# Per AGENTS.md §4: "clang-format (LLVM base) for C++".
+BasedOnStyle: LLVM
+ColumnLimit: 100
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+AccessModifierOffset: -2
+PointerAlignment: Left
+SortIncludes: false
+AllowShortIfStatementsOnASingleLine: false
+AllowShortLoopsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: Empty

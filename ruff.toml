@@ -1,0 +1,23 @@
+# Ruff configuration for ur_controllers.
+# Per AGENTS.md §4: "ruff format" + "ruff check" for Python.
+line-length = 100
+target-version = "py310"
+extend-exclude = [
+    "third_party",
+    "build",
+    "install",
+    "log",
+    ".auto_dev_logs",
+    "evaluation/runs",
+    "evaluation/reports",
+]
+
+[lint]
+# Conservative starter rule set: pyflakes (F), pycodestyle errors (E),
+# warnings (W), and isort (I). Keep it small enough that the existing
+# tree passes without forcing a large refactor; future iterations can
+# opt into more rule families as the codebase grows.
+select = ["E", "F", "W", "I"]
+ignore = [
+    "E501",  # line length is enforced by ruff format, not the linter
+]

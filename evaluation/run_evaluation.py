@@ -75,12 +75,8 @@ def _load_module(name: str, path: Path):
     return mod
 
 
-_VALIDATE = _load_module(
-    "_evaluation_scenario_validate", SCENARIO_DIR / "validate.py"
-)
-_REFERENCE = _load_module(
-    "_evaluation_reference", REPO_ROOT / "evaluation" / "_reference.py"
-)
+_VALIDATE = _load_module("_evaluation_scenario_validate", SCENARIO_DIR / "validate.py")
+_REFERENCE = _load_module("_evaluation_reference", REPO_ROOT / "evaluation" / "_reference.py")
 
 
 # ---------------------------------------------------------------------------
@@ -175,9 +171,7 @@ def known_controllers() -> list[str]:
 
 def get_controller(name: str) -> ControllerSpec:
     if name not in _CONTROLLERS:
-        raise KeyError(
-            f"unknown controller {name!r}; known: {known_controllers()}"
-        )
+        raise KeyError(f"unknown controller {name!r}; known: {known_controllers()}")
     return _CONTROLLERS[name]
 
 
@@ -210,18 +204,14 @@ def check_compatibility(spec: ControllerSpec, scenario: dict) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-def make_run_dir(
-    runs_root: Path, scenario_name: str, controller: str, robot: str
-) -> Path:
+def make_run_dir(runs_root: Path, scenario_name: str, controller: str, robot: str) -> Path:
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     run_dir = runs_root / f"{scenario_name}__{controller}__{robot}__{ts}"
     run_dir.mkdir(parents=True, exist_ok=False)
     return run_dir
 
 
-def write_target_csv_joint(
-    path: Path, samples, joints: list[str]
-) -> None:
+def write_target_csv_joint(path: Path, samples, joints: list[str]) -> None:
     """Write a target CSV for joint scenarios."""
     with path.open("w", encoding="utf-8") as f:
         f.write("t_s," + ",".join(joints) + "\n")
@@ -276,8 +266,7 @@ def write_manifest(
             "name": scenario.get("name"),
             "type": scenario.get("scenario_type"),
             "path": str(scenario_path.relative_to(REPO_ROOT))
-            if scenario_path.is_absolute()
-            and _is_relative_to(scenario_path, REPO_ROOT)
+            if scenario_path.is_absolute() and _is_relative_to(scenario_path, REPO_ROOT)
             else str(scenario_path),
             "duration_s": scenario.get("duration_s"),
             "metrics": scenario.get("metrics"),
@@ -369,9 +358,8 @@ def _kill_pg(proc: subprocess.Popen | None, timeout: float = 10.0) -> None:
 
 def _controller_states() -> dict[str, str]:
     import re as _re
-    cp = _bash(
-        "NO_COLOR=1 timeout 20 ros2 control list_controllers", timeout=30
-    )
+
+    cp = _bash("NO_COLOR=1 timeout 20 ros2 control list_controllers", timeout=30)
     states: dict[str, str] = {}
     if cp.returncode != 0:
         return states
@@ -443,13 +431,9 @@ def _record_topics_to_csv(
         vals = [vec[idx[j]] for j in CANONICAL_JOINTS]
         fh.write(f"{t:.6f}," + ",".join(f"{v:.9f}" for v in vals) + "\n")
 
-    node.create_subscription(
-        JointState, "/joint_states", lambda m: _row(m, js_f), 50
-    )
+    node.create_subscription(JointState, "/joint_states", lambda m: _row(m, js_f), 50)
     if tau_f is not None:
-        node.create_subscription(
-            JointState, tau_d_topic, lambda m: _row(m, tau_f), 50
-        )
+        node.create_subscription(JointState, tau_d_topic, lambda m: _row(m, tau_f), 50)
 
     try:
         deadline = time.monotonic() + duration_s
@@ -584,8 +568,7 @@ def _run_live(
 
     subprocess.run([str(REPO_ROOT / "scripts" / "kill_sim.sh")], check=False)
     sim_proc = _spawn_pg(
-        ["bash", str(REPO_ROOT / "scripts" / "launch_sim.sh"),
-         robot, controller.sim_mode],
+        ["bash", str(REPO_ROOT / "scripts" / "launch_sim.sh"), robot, controller.sim_mode],
         sim_log,
     )
     bringup_proc: subprocess.Popen | None = None
@@ -616,8 +599,7 @@ def _run_live(
                 "source /opt/ros/humble/setup.bash && "
                 f"source {REPO_ROOT}/install/setup.bash && "
                 f"ros2 launch {REPO_ROOT / controller.bringup_launch} "
-                f"robot:={robot} "
-                + " ".join(controller.bringup_args)
+                f"robot:={robot} " + " ".join(controller.bringup_args)
             ),
         ]
         bringup_proc = _spawn_pg(bringup_argv, bringup_log)
@@ -629,9 +611,7 @@ def _run_live(
                 and states.get(controller.displaced_controller) == "inactive"
             )
 
-        if not _wait_until(
-            _ctrl_active, CONTROLLER_READY_TIMEOUT_S, interval=2.0
-        ):
+        if not _wait_until(_ctrl_active, CONTROLLER_READY_TIMEOUT_S, interval=2.0):
             raise RuntimeError(
                 f"Controller {controller.controller_node!r} did not become "
                 f"the sole active commander for {robot}. See {bringup_log}."
@@ -645,12 +625,8 @@ def _run_live(
             )
 
         if controller.target_space == "joint" and controller.target_topic:
-            samples = _REFERENCE.generate_joint_reference(
-                scenario, initial, rate_hz=rate_hz
-            )
-            write_target_csv_joint(
-                run_dir / "target.csv", samples, CANONICAL_JOINTS
-            )
+            samples = _REFERENCE.generate_joint_reference(scenario, initial, rate_hz=rate_hz)
+            write_target_csv_joint(run_dir / "target.csv", samples, CANONICAL_JOINTS)
             target_proc = _publish_joint_reference_loop(
                 controller.target_topic, samples, target_log, rate_hz
             )
@@ -679,21 +655,11 @@ def _run_live(
             )
         else:
             # gravity-comp: regulation only, no target topic.
-            samples = _REFERENCE.generate_joint_reference(
-                scenario, initial, rate_hz=rate_hz
-            )
-            write_target_csv_joint(
-                run_dir / "target.csv", samples, CANONICAL_JOINTS
-            )
+            samples = _REFERENCE.generate_joint_reference(scenario, initial, rate_hz=rate_hz)
+            write_target_csv_joint(run_dir / "target.csv", samples, CANONICAL_JOINTS)
 
-        tau_d_csv = (
-            run_dir / "tau_d.csv" if controller.has_tau_d else None
-        )
-        tau_d_topic = (
-            f"/{controller.controller_node}/tau_d"
-            if controller.has_tau_d
-            else None
-        )
+        tau_d_csv = run_dir / "tau_d.csv" if controller.has_tau_d else None
+        tau_d_topic = f"/{controller.controller_node}/tau_d" if controller.has_tau_d else None
         _record_topics_to_csv(
             duration_s=float(scenario["duration_s"]),
             js_csv=run_dir / "joint_states.csv",
@@ -701,9 +667,7 @@ def _run_live(
             tau_d_topic=tau_d_topic,
         )
 
-        finished_at = datetime.now(timezone.utc).strftime(
-            "%Y-%m-%dT%H:%M:%SZ"
-        )
+        finished_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         artefacts = {
             "target_csv": "target.csv",
             "joint_states_csv": "joint_states.csv",
@@ -728,9 +692,7 @@ def _run_live(
         _kill_pg(target_proc)
         _kill_pg(bringup_proc)
         _kill_pg(sim_proc)
-        subprocess.run(
-            [str(REPO_ROOT / "scripts" / "kill_sim.sh")], check=False
-        )
+        subprocess.run([str(REPO_ROOT / "scripts" / "kill_sim.sh")], check=False)
 
 
 # ---------------------------------------------------------------------------
@@ -762,12 +724,8 @@ def _run_dry(
                     "live URDF; provide explicit bounds.lower/upper or run "
                     "without --dry-run."
                 )
-        samples = _REFERENCE.generate_joint_reference(
-            scenario, initial, rate_hz=rate_hz
-        )
-        write_target_csv_joint(
-            run_dir / "target.csv", samples, CANONICAL_JOINTS
-        )
+        samples = _REFERENCE.generate_joint_reference(scenario, initial, rate_hz=rate_hz)
+        write_target_csv_joint(run_dir / "target.csv", samples, CANONICAL_JOINTS)
     else:  # cartesian
         hold = scenario.get("command", {}).get("hold")
         if isinstance(hold, dict):
@@ -820,18 +778,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Run an evaluation scenario against a controller (M5)."
     )
-    parser.add_argument(
-        "--scenario", required=True, type=Path, help="Path to scenario YAML"
-    )
+    parser.add_argument("--scenario", required=True, type=Path, help="Path to scenario YAML")
     parser.add_argument(
         "--controller",
         required=True,
         choices=known_controllers(),
         help="Controller bring-up to use",
     )
-    parser.add_argument(
-        "--robot", required=True, choices=["ur5e", "ur15"]
-    )
+    parser.add_argument("--robot", required=True, choices=["ur5e", "ur15"])
     parser.add_argument(
         "--out-dir",
         type=Path,
@@ -879,17 +833,14 @@ def main(argv: list[str] | None = None) -> int:
     compat_errs = check_compatibility(controller, scenario)
     if compat_errs:
         print(
-            f"controller {args.controller!r} is not compatible with "
-            f"{args.scenario}:",
+            f"controller {args.controller!r} is not compatible with " f"{args.scenario}:",
             file=sys.stderr,
         )
         for e in compat_errs:
             print(f"  - {e}", file=sys.stderr)
         return 2
 
-    run_dir = make_run_dir(
-        args.out_dir, scenario["name"], args.controller, args.robot
-    )
+    run_dir = make_run_dir(args.out_dir, scenario["name"], args.controller, args.robot)
 
     if args.dry_run:
         initial = _parse_initial(args.initial_joints) or [0.0] * 6

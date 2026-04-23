@@ -89,9 +89,7 @@ def load_series(path: Path) -> Series:
             if not row:
                 continue
             if len(row) != len(header):
-                raise ValueError(
-                    f"{path}: row has {len(row)} cells, expected {len(header)}"
-                )
+                raise ValueError(f"{path}: row has {len(row)} cells, expected {len(header)}")
             try:
                 times.append(float(row[0]))
                 for name, cell in zip(header[1:], row[1:]):
@@ -157,8 +155,7 @@ def rmse_per_joint(
         o_vals = observed[name]
         if len(t_vals) != len(o_vals):
             raise ValueError(
-                f"rmse_per_joint: length mismatch for {name!r}: "
-                f"{len(t_vals)} vs {len(o_vals)}"
+                f"rmse_per_joint: length mismatch for {name!r}: " f"{len(t_vals)} vs {len(o_vals)}"
             )
         if not t_vals:
             out[name] = 0.0
@@ -394,15 +391,12 @@ def compute_metrics_for_run(run_dir: Path) -> dict:
         initial = manifest.get("initial_joint_positions")
         if not initial or len(initial) != len(joints):
             raise ValueError(
-                "step scenario: manifest.initial_joint_positions missing or "
-                "wrong length"
+                "step scenario: manifest.initial_joint_positions missing or " "wrong length"
             )
         # Pull the step parameters from the canonical scenario file referenced
         # in the manifest. The manifest itself doesn't carry per_joint_amplitude.
         scen_doc = _load_scenario_doc(run_dir, scenario)
-        amp, pre, post, step_time_s = _amplitude_and_step_targets(
-            scen_doc, initial, joints
-        )
+        amp, pre, post, step_time_s = _amplitude_and_step_targets(scen_doc, initial, joints)
         if "settling_time" in metrics_listed:
             per_joint = settling_time_per_joint(
                 target.times, post, observed_on_target, amp, step_time_s
@@ -479,8 +473,9 @@ def compute_metrics_for_run(run_dir: Path) -> dict:
                     "value": None,
                     "status": "skipped",
                     "reason": (
-                        m.get("reason") if isinstance(m, dict) else
-                        f"metric {metric_name!r} not computed"
+                        m.get("reason")
+                        if isinstance(m, dict)
+                        else f"metric {metric_name!r} not computed"
                     ),
                 }
             )
@@ -594,9 +589,7 @@ def write_metrics_csv(path: Path, payload: dict) -> None:
                 ]
             )
             for j, v in (m.get("per_joint") or {}).items():
-                rows.append(
-                    [name, j, _fmt_float(v), unit, status, reason]
-                )
+                rows.append([name, j, _fmt_float(v), unit, status, reason])
         else:
             rows.append([name, "_aggregate_", "", unit, status, reason])
     rows.append([])

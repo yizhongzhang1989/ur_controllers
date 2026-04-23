@@ -94,11 +94,7 @@ _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 
 def _bash(cmd: str, timeout: float = 30.0) -> subprocess.CompletedProcess:
-    full = (
-        "source /opt/ros/humble/setup.bash && "
-        f"source {INSTALL_SETUP} && "
-        f"{cmd}"
-    )
+    full = "source /opt/ros/humble/setup.bash && " f"source {INSTALL_SETUP} && " f"{cmd}"
     return subprocess.run(
         ["bash", "-c", full],
         capture_output=True,
@@ -138,7 +134,7 @@ def _joint_state_positions() -> dict[str, float] | None:
         line = raw.rstrip()
         stripped = line.strip()
         if stripped.startswith("name:"):
-            rest = stripped[len("name:"):].strip()
+            rest = stripped[len("name:") :].strip()
             if rest.startswith("[") and rest.endswith("]"):
                 names = [n.strip().strip("'\"") for n in rest[1:-1].split(",") if n.strip()]
                 current_list = None
@@ -147,7 +143,7 @@ def _joint_state_positions() -> dict[str, float] | None:
                 current_list = names
             continue
         if stripped.startswith("position:"):
-            rest = stripped[len("position:"):].strip()
+            rest = stripped[len("position:") :].strip()
             if rest.startswith("[") and rest.endswith("]"):
                 positions = [float(x) for x in rest[1:-1].split(",") if x.strip()]
                 current_list = None
@@ -193,9 +189,7 @@ def _collect_joint_state_samples(duration_s: float) -> list[dict[str, float]]:
 
     def _cb(msg) -> None:  # sensor_msgs/JointState
         if msg.name and len(msg.name) == len(msg.position):
-            samples.append(
-                {n: float(p) for n, p in zip(msg.name, msg.position)}
-            )
+            samples.append({n: float(p) for n, p in zip(msg.name, msg.position)})
 
     node.create_subscription(JointState, "/joint_states", _cb, 10)
     try:
@@ -265,11 +259,10 @@ def crisp_cartesian_up(request):
     sim_log = log_dir / f"crisp_cart_sim_{robot}.log"
     bringup_log = log_dir / f"crisp_cart_bringup_{robot}.log"
 
-    sim_proc = _spawn_in_pgid(
-        ["bash", str(LAUNCH_SIM), robot, "effort"], sim_log
-    )
+    sim_proc = _spawn_in_pgid(["bash", str(LAUNCH_SIM), robot, "effort"], sim_log)
     bringup_proc: subprocess.Popen | None = None
     try:
+
         def sim_ready() -> bool:
             states = _controller_states()
             return (
@@ -329,9 +322,7 @@ def test_crisp_cartesian_impedance_hold_pose(crisp_cartesian_up):
     #    and q_target to the current joint vector, so no extra target
     #    publish is needed — the controller should just hold here.
     q0 = _joint_state_positions()
-    assert q0 is not None, (
-        f"No /joint_states message after crisp activation ({robot})."
-    )
+    assert q0 is not None, f"No /joint_states message after crisp activation ({robot})."
     for j in EXPECTED_JOINTS:
         assert j in q0, f"joint {j!r} missing from /joint_states: {q0}"
 

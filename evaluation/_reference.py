@@ -37,9 +37,7 @@ class JointReferenceSample:
 
 def _check_initial(initial: list[float] | tuple[float, ...]) -> tuple[float, ...]:
     if len(initial) != N_JOINTS:
-        raise ValueError(
-            f"initial must be a length-{N_JOINTS} vector, got {len(initial)}"
-        )
+        raise ValueError(f"initial must be a length-{N_JOINTS} vector, got {len(initial)}")
     return tuple(float(x) for x in initial)
 
 
@@ -63,8 +61,7 @@ def generate_step(
     q0 = _check_initial(initial)
     if len(per_joint_amplitude_rad) != N_JOINTS:
         raise ValueError(
-            "per_joint_amplitude_rad must be length 6, got "
-            f"{len(per_joint_amplitude_rad)}"
+            "per_joint_amplitude_rad must be length 6, got " f"{len(per_joint_amplitude_rad)}"
         )
     if step_time_s < 0 or step_time_s >= duration_s:
         raise ValueError(
@@ -77,11 +74,7 @@ def generate_step(
         if t < step_time_s:
             samples.append(JointReferenceSample(t, q0))
         else:
-            samples.append(
-                JointReferenceSample(
-                    t, tuple(q0[i] + amp[i] for i in range(N_JOINTS))
-                )
-            )
+            samples.append(JointReferenceSample(t, tuple(q0[i] + amp[i] for i in range(N_JOINTS))))
     return samples
 
 
@@ -97,8 +90,7 @@ def generate_sine(
     q0 = _check_initial(initial)
     if len(per_joint_amplitude_rad) != N_JOINTS:
         raise ValueError(
-            "per_joint_amplitude_rad must be length 6, got "
-            f"{len(per_joint_amplitude_rad)}"
+            "per_joint_amplitude_rad must be length 6, got " f"{len(per_joint_amplitude_rad)}"
         )
     if frequency_hz <= 0:
         raise ValueError(f"frequency_hz must be > 0, got {frequency_hz}")
@@ -107,11 +99,7 @@ def generate_sine(
     samples: list[JointReferenceSample] = []
     for t in _times(duration_s, rate_hz):
         s = math.sin(omega * t + float(phase_rad))
-        samples.append(
-            JointReferenceSample(
-                t, tuple(q0[i] + amp[i] * s for i in range(N_JOINTS))
-            )
-        )
+        samples.append(JointReferenceSample(t, tuple(q0[i] + amp[i] * s for i in range(N_JOINTS))))
     return samples
 
 
@@ -127,9 +115,7 @@ def generate_regulation_joint(
         target = q0
     else:
         if not isinstance(hold, (list, tuple)) or len(hold) != N_JOINTS:
-            raise ValueError(
-                "regulation hold must be 'initial' or a length-6 vector"
-            )
+            raise ValueError("regulation hold must be 'initial' or a length-6 vector")
         target = tuple(float(x) for x in hold)
     return [JointReferenceSample(t, target) for t in _times(duration_s, rate_hz)]
 
@@ -167,8 +153,7 @@ def generate_random_waypoints(
             raise ValueError(f"bounds: lower[{i}] ({a}) must be < upper[{i}] ({b})")
     rng = random.Random(int(seed))
     waypoints: list[tuple[float, ...]] = [
-        tuple(rng.uniform(lo[i], hi[i]) for i in range(N_JOINTS))
-        for _ in range(int(num_waypoints))
+        tuple(rng.uniform(lo[i], hi[i]) for i in range(N_JOINTS)) for _ in range(int(num_waypoints))
     ]
     samples: list[JointReferenceSample] = []
     for t in _times(duration_s, rate_hz):
@@ -190,9 +175,7 @@ def generate_joint_reference(
     """
     target = scenario.get("target", {})
     if target.get("space") != "joint":
-        raise ValueError(
-            "generate_joint_reference: scenario.target.space must be 'joint'"
-        )
+        raise ValueError("generate_joint_reference: scenario.target.space must be 'joint'")
     stype = scenario.get("scenario_type")
     cmd = scenario.get("command", {})
     duration_s = float(scenario["duration_s"])
@@ -214,9 +197,7 @@ def generate_joint_reference(
             rate_hz,
         )
     if stype == "regulation":
-        return generate_regulation_joint(
-            initial, cmd.get("hold", "initial"), duration_s, rate_hz
-        )
+        return generate_regulation_joint(initial, cmd.get("hold", "initial"), duration_s, rate_hz)
     if stype == "random_waypoints":
         bounds = cmd["bounds"]
         if bounds == "urdf":

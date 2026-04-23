@@ -59,9 +59,7 @@ RUN = _load("_eval_run", EVAL_DIR / "run_evaluation.py")
 def test_step_holds_then_jumps():
     q0 = [0.1, -1.5, 1.2, 0.0, 1.0, 0.0]
     amp = [0.0, 0.1, 0.0, 0.0, 0.0, 0.0]
-    samples = REF.generate_step(
-        q0, amp, step_time_s=1.0, duration_s=2.0, rate_hz=10.0
-    )
+    samples = REF.generate_step(q0, amp, step_time_s=1.0, duration_s=2.0, rate_hz=10.0)
     assert samples[0].t_s == pytest.approx(0.0)
     # Last sample lands at floor(2.0*10)+1 = 21 samples; t = 2.0
     assert len(samples) == 21
@@ -88,31 +86,30 @@ def test_sine_starts_at_initial_when_phase_zero():
     q0 = [0.0, -1.0, 0.5, 0.0, 1.0, 0.0]
     amp = [0.0, 0.05, 0.0, 0.0, 0.0, 0.0]
     samples = REF.generate_sine(
-        q0, amp, frequency_hz=0.5, phase_rad=0.0,
-        duration_s=2.0, rate_hz=100.0,
+        q0,
+        amp,
+        frequency_hz=0.5,
+        phase_rad=0.0,
+        duration_s=2.0,
+        rate_hz=100.0,
     )
     assert list(samples[0].position) == pytest.approx(q0)
     # Quarter period for f=0.5 Hz is 0.5 s -> peak amplitude.
     quarter = next(s for s in samples if s.t_s >= 0.5 - 1e-9)
-    expected = [q0[i] + amp[i] * math.sin(2 * math.pi * 0.5 * quarter.t_s)
-                for i in range(6)]
+    expected = [q0[i] + amp[i] * math.sin(2 * math.pi * 0.5 * quarter.t_s) for i in range(6)]
     assert list(quarter.position) == pytest.approx(expected, abs=1e-9)
 
 
 def test_regulation_initial_is_constant():
     q0 = [0.1, -1.5, 1.2, 0.0, 1.0, 0.0]
-    samples = REF.generate_regulation_joint(
-        q0, hold="initial", duration_s=1.0, rate_hz=10.0
-    )
+    samples = REF.generate_regulation_joint(q0, hold="initial", duration_s=1.0, rate_hz=10.0)
     assert all(list(s.position) == pytest.approx(q0) for s in samples)
 
 
 def test_regulation_explicit_hold_overrides_initial():
     q0 = [0.0] * 6
     target = [0.2, 0.0, 0.0, 0.0, 0.0, 0.0]
-    samples = REF.generate_regulation_joint(
-        q0, hold=target, duration_s=0.5, rate_hz=10.0
-    )
+    samples = REF.generate_regulation_joint(q0, hold=target, duration_s=0.5, rate_hz=10.0)
     assert all(list(s.position) == pytest.approx(target) for s in samples)
 
 
@@ -121,21 +118,36 @@ def test_random_waypoints_deterministic_from_seed():
     lo = [-0.5] * 6
     hi = [0.5] * 6
     a = REF.generate_random_waypoints(
-        q0, num_waypoints=3, dwell_s=1.0, seed=42,
-        bounds_lower=lo, bounds_upper=hi,
-        duration_s=3.0, rate_hz=10.0,
+        q0,
+        num_waypoints=3,
+        dwell_s=1.0,
+        seed=42,
+        bounds_lower=lo,
+        bounds_upper=hi,
+        duration_s=3.0,
+        rate_hz=10.0,
     )
     b = REF.generate_random_waypoints(
-        q0, num_waypoints=3, dwell_s=1.0, seed=42,
-        bounds_lower=lo, bounds_upper=hi,
-        duration_s=3.0, rate_hz=10.0,
+        q0,
+        num_waypoints=3,
+        dwell_s=1.0,
+        seed=42,
+        bounds_lower=lo,
+        bounds_upper=hi,
+        duration_s=3.0,
+        rate_hz=10.0,
     )
     assert [s.position for s in a] == [s.position for s in b]
     # Different seed -> different first waypoint (overwhelmingly likely).
     c = REF.generate_random_waypoints(
-        q0, num_waypoints=3, dwell_s=1.0, seed=43,
-        bounds_lower=lo, bounds_upper=hi,
-        duration_s=3.0, rate_hz=10.0,
+        q0,
+        num_waypoints=3,
+        dwell_s=1.0,
+        seed=43,
+        bounds_lower=lo,
+        bounds_upper=hi,
+        duration_s=3.0,
+        rate_hz=10.0,
     )
     assert a[0].position != c[0].position
 
@@ -145,9 +157,14 @@ def test_random_waypoints_segments_change_at_dwell_boundary():
     lo = [-0.5] * 6
     hi = [0.5] * 6
     samples = REF.generate_random_waypoints(
-        q0, num_waypoints=2, dwell_s=1.0, seed=7,
-        bounds_lower=lo, bounds_upper=hi,
-        duration_s=2.0, rate_hz=10.0,
+        q0,
+        num_waypoints=2,
+        dwell_s=1.0,
+        seed=7,
+        bounds_lower=lo,
+        bounds_upper=hi,
+        duration_s=2.0,
+        rate_hz=10.0,
     )
     pre = next(s for s in samples if s.t_s < 1.0 - 1e-9)
     post = next(s for s in samples if s.t_s >= 1.0)
@@ -159,9 +176,14 @@ def test_random_waypoints_rejects_bad_bounds():
     q0 = [0.0] * 6
     with pytest.raises(ValueError):
         REF.generate_random_waypoints(
-            q0, num_waypoints=1, dwell_s=1.0, seed=0,
-            bounds_lower=[1.0] * 6, bounds_upper=[1.0] * 6,
-            duration_s=1.0, rate_hz=10.0,
+            q0,
+            num_waypoints=1,
+            dwell_s=1.0,
+            seed=0,
+            bounds_lower=[1.0] * 6,
+            bounds_upper=[1.0] * 6,
+            duration_s=1.0,
+            rate_hz=10.0,
         )
 
 
@@ -182,7 +204,9 @@ def test_dispatch_rejects_urdf_bounds():
         "duration_s": 2.0,
         "target": {"space": "joint"},
         "command": {
-            "num_waypoints": 1, "dwell_s": 1.0, "seed": 0,
+            "num_waypoints": 1,
+            "dwell_s": 1.0,
+            "seed": 0,
             "bounds": "urdf",
         },
     }
@@ -206,13 +230,16 @@ def test_known_controllers_includes_each_bringup():
     }
 
 
-@pytest.mark.parametrize("name", [
-    "crisp_joint_impedance",
-    "crisp_cartesian_impedance",
-    "crisp_gravity_compensation",
-    "simple_joint_impedance",
-    "cartesian_motion",
-])
+@pytest.mark.parametrize(
+    "name",
+    [
+        "crisp_joint_impedance",
+        "crisp_cartesian_impedance",
+        "crisp_gravity_compensation",
+        "simple_joint_impedance",
+        "cartesian_motion",
+    ],
+)
 def test_controller_config_files_exist(name):
     spec = RUN.get_controller(name)
     for robot in ("ur5e", "ur15"):
@@ -220,31 +247,30 @@ def test_controller_config_files_exist(name):
         assert cfg.is_file(), f"missing controller config: {cfg}"
 
 
-@pytest.mark.parametrize("name", [
-    "crisp_joint_impedance",
-    "crisp_cartesian_impedance",
-    "crisp_gravity_compensation",
-    "simple_joint_impedance",
-    "cartesian_motion",
-])
+@pytest.mark.parametrize(
+    "name",
+    [
+        "crisp_joint_impedance",
+        "crisp_cartesian_impedance",
+        "crisp_gravity_compensation",
+        "simple_joint_impedance",
+        "cartesian_motion",
+    ],
+)
 def test_controller_bringup_files_exist(name):
     spec = RUN.get_controller(name)
     assert (REPO_ROOT / spec.bringup_launch).is_file()
 
 
 def test_compatibility_joint_scenario_against_cartesian_controller():
-    scenario = yaml.safe_load(
-        (SCENARIO_DIR / "step.example.yaml").read_text(encoding="utf-8")
-    )
+    scenario = yaml.safe_load((SCENARIO_DIR / "step.example.yaml").read_text(encoding="utf-8"))
     spec = RUN.get_controller("cartesian_motion")
     errs = RUN.check_compatibility(spec, scenario)
     assert errs and "target.space" in errs[0]
 
 
 def test_compatibility_gravity_only_supports_regulation():
-    scenario = yaml.safe_load(
-        (SCENARIO_DIR / "step.example.yaml").read_text(encoding="utf-8")
-    )
+    scenario = yaml.safe_load((SCENARIO_DIR / "step.example.yaml").read_text(encoding="utf-8"))
     spec = RUN.get_controller("crisp_gravity_compensation")
     errs = RUN.check_compatibility(spec, scenario)
     assert any("regulation" in e for e in errs)
@@ -291,15 +317,23 @@ DRY_RUN_PAIRS = [
 @pytest.mark.parametrize("scenario_file,controller", DRY_RUN_PAIRS)
 def test_dry_run_emits_target_and_manifest(tmp_path, scenario_file, controller):
     scenario_path = SCENARIO_DIR / scenario_file
-    rc = RUN.main([
-        "--scenario", str(scenario_path),
-        "--controller", controller,
-        "--robot", "ur5e",
-        "--out-dir", str(tmp_path),
-        "--dry-run",
-        "--initial-joints", "0,-1.57,1.57,0,1.57,0",
-        "--rate-hz", "20",
-    ])
+    rc = RUN.main(
+        [
+            "--scenario",
+            str(scenario_path),
+            "--controller",
+            controller,
+            "--robot",
+            "ur5e",
+            "--out-dir",
+            str(tmp_path),
+            "--dry-run",
+            "--initial-joints",
+            "0,-1.57,1.57,0,1.57,0",
+            "--rate-hz",
+            "20",
+        ]
+    )
     assert rc == 0
     runs = list(tmp_path.iterdir())
     assert len(runs) == 1
@@ -334,9 +368,7 @@ def test_dry_run_emits_target_and_manifest(tmp_path, scenario_file, controller):
     assert payload["robot"] == "ur5e"
     assert payload["runner"]["dry_run"] is True
     assert payload["scenario"]["name"]
-    assert payload["initial_joint_positions"] == pytest.approx(
-        [0.0, -1.57, 1.57, 0.0, 1.57, 0.0]
-    )
+    assert payload["initial_joint_positions"] == pytest.approx([0.0, -1.57, 1.57, 0.0, 1.57, 0.0])
 
 
 def test_dry_run_cartesian_regulation_emits_8col_target(tmp_path):
@@ -365,14 +397,21 @@ def test_dry_run_cartesian_regulation_emits_8col_target(tmp_path):
     scenario_file = tmp_path / "scenario.yaml"
     scenario_file.write_text(yaml.safe_dump(scenario), encoding="utf-8")
     out = tmp_path / "out"
-    rc = RUN.main([
-        "--scenario", str(scenario_file),
-        "--controller", "cartesian_motion",
-        "--robot", "ur5e",
-        "--out-dir", str(out),
-        "--dry-run",
-        "--rate-hz", "10",
-    ])
+    rc = RUN.main(
+        [
+            "--scenario",
+            str(scenario_file),
+            "--controller",
+            "cartesian_motion",
+            "--robot",
+            "ur5e",
+            "--out-dir",
+            str(out),
+            "--dry-run",
+            "--rate-hz",
+            "10",
+        ]
+    )
     assert rc == 0
     run_dir = next(out.iterdir())
     rows = list(csv.reader((run_dir / "target.csv").open()))
@@ -386,13 +425,19 @@ def test_dry_run_cartesian_regulation_emits_8col_target(tmp_path):
 def test_cli_rejects_invalid_scenario(tmp_path):
     bad = tmp_path / "bad.yaml"
     bad.write_text("not_a_scenario: true\n", encoding="utf-8")
-    rc = RUN.main([
-        "--scenario", str(bad),
-        "--controller", "simple_joint_impedance",
-        "--robot", "ur5e",
-        "--out-dir", str(tmp_path / "out"),
-        "--dry-run",
-    ])
+    rc = RUN.main(
+        [
+            "--scenario",
+            str(bad),
+            "--controller",
+            "simple_joint_impedance",
+            "--robot",
+            "ur5e",
+            "--out-dir",
+            str(tmp_path / "out"),
+            "--dry-run",
+        ]
+    )
     assert rc == 2
 
 
@@ -407,7 +452,8 @@ def test_cli_rejects_robot_not_in_scenario(tmp_path):
         "robots": ["ur5e"],
         "target": {
             "space": "joint",
-            "joints": list(REF.__dict__.get("CANONICAL_JOINTS", [])) or [
+            "joints": list(REF.__dict__.get("CANONICAL_JOINTS", []))
+            or [
                 "shoulder_pan_joint",
                 "shoulder_lift_joint",
                 "elbow_joint",
@@ -422,25 +468,37 @@ def test_cli_rejects_robot_not_in_scenario(tmp_path):
     }
     scenario_file = tmp_path / "scenario.yaml"
     scenario_file.write_text(yaml.safe_dump(scenario), encoding="utf-8")
-    rc = RUN.main([
-        "--scenario", str(scenario_file),
-        "--controller", "simple_joint_impedance",
-        "--robot", "ur15",
-        "--out-dir", str(tmp_path / "out"),
-        "--dry-run",
-    ])
+    rc = RUN.main(
+        [
+            "--scenario",
+            str(scenario_file),
+            "--controller",
+            "simple_joint_impedance",
+            "--robot",
+            "ur15",
+            "--out-dir",
+            str(tmp_path / "out"),
+            "--dry-run",
+        ]
+    )
     assert rc == 2
 
 
 def test_cli_rejects_incompatible_controller(tmp_path):
     scenario_path = SCENARIO_DIR / "step.example.yaml"
-    rc = RUN.main([
-        "--scenario", str(scenario_path),
-        "--controller", "cartesian_motion",
-        "--robot", "ur5e",
-        "--out-dir", str(tmp_path),
-        "--dry-run",
-    ])
+    rc = RUN.main(
+        [
+            "--scenario",
+            str(scenario_path),
+            "--controller",
+            "cartesian_motion",
+            "--robot",
+            "ur5e",
+            "--out-dir",
+            str(tmp_path),
+            "--dry-run",
+        ]
+    )
     assert rc == 2
 
 
@@ -448,7 +506,9 @@ def test_module_runs_as_script(tmp_path):
     """``python3 evaluation/run_evaluation.py --help`` does not crash."""
     cp = subprocess.run(
         [sys.executable, str(EVAL_DIR / "run_evaluation.py"), "--help"],
-        capture_output=True, text=True, timeout=30,
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
     assert cp.returncode == 0
     assert "evaluation scenario" in cp.stdout.lower()

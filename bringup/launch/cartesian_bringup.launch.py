@@ -57,7 +57,6 @@ import tempfile
 from pathlib import Path
 
 import yaml
-
 from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
@@ -73,9 +72,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_DIR = REPO_ROOT / "bringup" / "config"
 
 CONTROLLER_NAME = "cartesian_motion_controller"
-CONTROLLER_TYPE = (
-    "cartesian_motion_controller/CartesianMotionController"
-)
+CONTROLLER_TYPE = "cartesian_motion_controller/CartesianMotionController"
 CONFIG_STEM = "cartesian_motion"
 # In position-mode sim bring-up, joint_trajectory_controller owns the
 # position command interfaces; see the controller-activation block in
@@ -102,9 +99,7 @@ def _fetch_robot_description() -> str:
         rclpy.init()
     node = rclpy.create_node("_cartesian_bringup_rd_fetcher")
     try:
-        client = node.create_client(
-            GetParameters, "/robot_state_publisher/get_parameters"
-        )
+        client = node.create_client(GetParameters, "/robot_state_publisher/get_parameters")
         if not client.wait_for_service(timeout_sec=30.0):
             raise RuntimeError(
                 "cartesian_bringup: /robot_state_publisher not reachable; "
@@ -128,8 +123,7 @@ def _fetch_robot_description() -> str:
         xml = values[0].string_value
         if not xml:
             raise RuntimeError(
-                "cartesian_bringup: /robot_state_publisher returned an "
-                "empty robot_description."
+                "cartesian_bringup: /robot_state_publisher returned an " "empty robot_description."
             )
         return xml
     finally:
@@ -157,9 +151,7 @@ def _write_robot_description_param_file(robot_description: str) -> Path:
             }
         }
     }
-    fd, path = tempfile.mkstemp(
-        prefix="cartesian_bringup_rd_", suffix=".yaml"
-    )
+    fd, path = tempfile.mkstemp(prefix="cartesian_bringup_rd_", suffix=".yaml")
     with os.fdopen(fd, "w") as fh:
         yaml.safe_dump(payload, fh)
     return Path(path)
@@ -184,22 +176,31 @@ def launch_setup(context, *_args, **_kwargs):
         name=f"{CONTROLLER_NAME}_spawner",
         arguments=[
             CONTROLLER_NAME,
-            "--controller-manager", "/controller_manager",
-            "--controller-type", CONTROLLER_TYPE,
-            "--param-file", str(config_path),
-            "--param-file", str(rd_param_file),
+            "--controller-manager",
+            "/controller_manager",
+            "--controller-type",
+            CONTROLLER_TYPE,
+            "--param-file",
+            str(config_path),
+            "--param-file",
+            str(rd_param_file),
             "--inactive",
-            "--service-call-timeout", "30",
+            "--service-call-timeout",
+            "30",
         ],
         output="screen",
     )
 
     switch = ExecuteProcess(
         cmd=[
-            "ros2", "control", "switch_controllers",
+            "ros2",
+            "control",
+            "switch_controllers",
             "--strict",
-            "--deactivate", DISPLACED_CONTROLLER,
-            "--activate", CONTROLLER_NAME,
+            "--deactivate",
+            DISPLACED_CONTROLLER,
+            "--activate",
+            CONTROLLER_NAME,
         ],
         output="screen",
     )

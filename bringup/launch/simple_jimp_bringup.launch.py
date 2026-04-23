@@ -43,9 +43,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_DIR = REPO_ROOT / "bringup" / "config"
 
 CONTROLLER_NAME = "simple_joint_impedance_controller"
-CONTROLLER_TYPE = (
-    "simple_joint_impedance_controller/SimpleJointImpedanceController"
-)
+CONTROLLER_TYPE = "simple_joint_impedance_controller/SimpleJointImpedanceController"
 CONFIG_STEM = "simple_joint_impedance"
 
 
@@ -65,21 +63,29 @@ def launch_setup(context, *_args, **_kwargs):
         name=f"{CONTROLLER_NAME}_spawner",
         arguments=[
             CONTROLLER_NAME,
-            "--controller-manager", "/controller_manager",
-            "--controller-type", CONTROLLER_TYPE,
-            "--param-file", str(config_path),
+            "--controller-manager",
+            "/controller_manager",
+            "--controller-type",
+            CONTROLLER_TYPE,
+            "--param-file",
+            str(config_path),
             "--inactive",
-            "--service-call-timeout", "30",
+            "--service-call-timeout",
+            "30",
         ],
         output="screen",
     )
 
     switch = ExecuteProcess(
         cmd=[
-            "ros2", "control", "switch_controllers",
+            "ros2",
+            "control",
+            "switch_controllers",
             "--strict",
-            "--deactivate", "forward_effort_controller",
-            "--activate", CONTROLLER_NAME,
+            "--deactivate",
+            "forward_effort_controller",
+            "--activate",
+            CONTROLLER_NAME,
         ],
         output="screen",
     )

@@ -65,9 +65,7 @@ def _base_step() -> dict:
 # --- Examples on disk -------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "path", sorted(SCENARIO_DIR.glob("*.example.yaml")), ids=lambda p: p.name
-)
+@pytest.mark.parametrize("path", sorted(SCENARIO_DIR.glob("*.example.yaml")), ids=lambda p: p.name)
 def test_example_yaml_validates(path: Path) -> None:
     errors = validate.validate_file(path)
     assert errors == [], f"{path}: {errors}"

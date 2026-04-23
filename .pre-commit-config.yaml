@@ -1,0 +1,49 @@
+# Pre-commit configuration for ur_controllers.
+#
+# Hooks (per AGENTS.md §4 "Coding standards"):
+#   - clang-format (LLVM base) for C++.
+#   - ruff (check + format) for Python.
+#   - trailing-whitespace + end-of-file-fixer + yaml/merge-conflict checks.
+#
+# Excludes the read-only submodules under third_party/ (ADR-0003) and all
+# colcon build artefacts. Run with `pre-commit run --all-files` from the
+# repo root; the framework manages tool installs in its own venv/node env
+# so the host only needs `pre-commit` itself on PATH.
+exclude: |
+  (?x)^(
+      third_party/.*|
+      build/.*|
+      install/.*|
+      log/.*|
+      \.auto_dev_logs/.*|
+      evaluation/runs/.*|
+      evaluation/reports/.*|
+      evaluation/baselines/.*\.(bag|mcap)(/.*)?
+  )$
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+        # Some ROS launch / param files use multi-document YAML or custom tags;
+        # allow both so the hook does not false-positive on legitimate configs.
+        args: [--allow-multiple-documents, --unsafe]
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=1024]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/mirrors-clang-format
+    rev: v18.1.8
+    hooks:
+      - id: clang-format
+        types_or: [c++, c]

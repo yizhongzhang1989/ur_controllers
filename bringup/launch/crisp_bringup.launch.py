@@ -74,21 +74,29 @@ def launch_setup(context, *_args, **_kwargs):
         name=f"{controller_name}_spawner",
         arguments=[
             controller_name,
-            "--controller-manager", "/controller_manager",
-            "--controller-type", "crisp_controllers/CartesianController",
-            "--param-file", str(config_path),
+            "--controller-manager",
+            "/controller_manager",
+            "--controller-type",
+            "crisp_controllers/CartesianController",
+            "--param-file",
+            str(config_path),
             "--inactive",
-            "--service-call-timeout", "30",
+            "--service-call-timeout",
+            "30",
         ],
         output="screen",
     )
 
     switch = ExecuteProcess(
         cmd=[
-            "ros2", "control", "switch_controllers",
+            "ros2",
+            "control",
+            "switch_controllers",
             "--strict",
-            "--deactivate", "forward_effort_controller",
-            "--activate", controller_name,
+            "--deactivate",
+            "forward_effort_controller",
+            "--activate",
+            controller_name,
         ],
         output="screen",
     )

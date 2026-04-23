@@ -89,31 +89,24 @@ def _validate_target(target: Any, errors: list[str]) -> str | None:
         return None
     space = target.get("space")
     if space not in ALLOWED_SPACES:
-        errors.append(
-            f"target.space: must be one of {sorted(ALLOWED_SPACES)}, got {space!r}"
-        )
+        errors.append(f"target.space: must be one of {sorted(ALLOWED_SPACES)}, got {space!r}")
         return None
     if space == "joint":
         joints = target.get("joints")
         if joints != list(CANONICAL_JOINTS):
             errors.append(
-                "target.joints: must equal the canonical 6-joint list "
-                f"{list(CANONICAL_JOINTS)}"
+                "target.joints: must equal the canonical 6-joint list " f"{list(CANONICAL_JOINTS)}"
             )
         for forbidden in ("frame_id", "end_effector"):
             if forbidden in target:
-                errors.append(
-                    f"target.{forbidden}: not allowed when space==joint"
-                )
+                errors.append(f"target.{forbidden}: not allowed when space==joint")
     else:  # cartesian
         if "joints" in target:
             errors.append("target.joints: not allowed when space==cartesian")
         for required in ("frame_id", "end_effector"):
             v = target.get(required)
             if not isinstance(v, str) or not v:
-                errors.append(
-                    f"target.{required}: required non-empty string when space==cartesian"
-                )
+                errors.append(f"target.{required}: required non-empty string when space==cartesian")
     return space
 
 
@@ -133,9 +126,7 @@ def _validate_command_step(cmd: dict, duration_s: float, errors: list[str]) -> N
     if not _is_finite_number(step_time) or float(step_time) < 0:
         errors.append("command.step_time_s: must be a finite number >= 0")
     elif float(step_time) >= duration_s:
-        errors.append(
-            f"command.step_time_s ({step_time}) must be < duration_s ({duration_s})"
-        )
+        errors.append(f"command.step_time_s ({step_time}) must be < duration_s ({duration_s})")
 
 
 def _validate_command_sine(cmd: dict, errors: list[str]) -> None:
@@ -163,9 +154,7 @@ def _validate_command_regulation(cmd: dict, space: str, errors: list[str]) -> No
         return
     if space == "joint":
         if not isinstance(hold, list):
-            errors.append(
-                "command.hold: must be 'initial' or a length-6 list of floats"
-            )
+            errors.append("command.hold: must be 'initial' or a length-6 list of floats")
             return
         _check_float_vector("command.hold", hold, N_JOINTS, errors)
     else:  # cartesian
@@ -175,9 +164,7 @@ def _validate_command_regulation(cmd: dict, space: str, errors: list[str]) -> No
                 "position_xyz_m + orientation_xyzw"
             )
             return
-        _check_float_vector(
-            "command.hold.position_xyz_m", hold.get("position_xyz_m"), 3, errors
-        )
+        _check_float_vector("command.hold.position_xyz_m", hold.get("position_xyz_m"), 3, errors)
         if _check_float_vector(
             "command.hold.orientation_xyzw",
             hold.get("orientation_xyzw"),
@@ -193,9 +180,7 @@ def _validate_command_regulation(cmd: dict, space: str, errors: list[str]) -> No
                 )
 
 
-def _validate_command_random_waypoints(
-    cmd: dict, duration_s: float, errors: list[str]
-) -> None:
+def _validate_command_random_waypoints(cmd: dict, duration_s: float, errors: list[str]) -> None:
     n = cmd.get("num_waypoints")
     if not isinstance(n, int) or isinstance(n, bool) or n < 1:
         errors.append("command.num_waypoints: must be an int >= 1")
@@ -216,22 +201,14 @@ def _validate_command_random_waypoints(
     if bounds == "urdf":
         return
     if not isinstance(bounds, dict):
-        errors.append(
-            "command.bounds: must be 'urdf' or a mapping with lower + upper"
-        )
+        errors.append("command.bounds: must be 'urdf' or a mapping with lower + upper")
         return
-    lower_ok = _check_float_vector(
-        "command.bounds.lower", bounds.get("lower"), N_JOINTS, errors
-    )
-    upper_ok = _check_float_vector(
-        "command.bounds.upper", bounds.get("upper"), N_JOINTS, errors
-    )
+    lower_ok = _check_float_vector("command.bounds.lower", bounds.get("lower"), N_JOINTS, errors)
+    upper_ok = _check_float_vector("command.bounds.upper", bounds.get("upper"), N_JOINTS, errors)
     if lower_ok and upper_ok:
         for i, (lo, hi) in enumerate(zip(bounds["lower"], bounds["upper"])):
             if float(lo) >= float(hi):
-                errors.append(
-                    f"command.bounds: lower[{i}] ({lo}) must be < upper[{i}] ({hi})"
-                )
+                errors.append(f"command.bounds: lower[{i}] ({lo}) must be < upper[{i}] ({hi})")
 
 
 def _validate_metrics(metrics: Any, errors: list[str]) -> set[str]:
@@ -244,9 +221,7 @@ def _validate_metrics(metrics: Any, errors: list[str]) -> set[str]:
             errors.append(f"metrics: duplicate entry {m!r}")
         seen.add(m)
         if m not in ALLOWED_METRICS:
-            errors.append(
-                f"metrics: {m!r} is not one of {sorted(ALLOWED_METRICS)}"
-            )
+            errors.append(f"metrics: {m!r} is not one of {sorted(ALLOWED_METRICS)}")
     return seen
 
 
@@ -304,9 +279,7 @@ def validate_scenario(doc: Any) -> list[str]:
         return ["top-level: must be a mapping"]
 
     if doc.get("schema_version") != 1:
-        errors.append(
-            f"schema_version: must be 1, got {doc.get('schema_version')!r}"
-        )
+        errors.append(f"schema_version: must be 1, got {doc.get('schema_version')!r}")
 
     name = doc.get("name")
     if not isinstance(name, str) or not name:
@@ -320,8 +293,7 @@ def validate_scenario(doc: Any) -> list[str]:
     stype = doc.get("scenario_type")
     if stype not in ALLOWED_SCENARIO_TYPES:
         errors.append(
-            f"scenario_type: must be one of {sorted(ALLOWED_SCENARIO_TYPES)}, "
-            f"got {stype!r}"
+            f"scenario_type: must be one of {sorted(ALLOWED_SCENARIO_TYPES)}, " f"got {stype!r}"
         )
 
     duration = doc.get("duration_s")
@@ -334,9 +306,7 @@ def validate_scenario(doc: Any) -> list[str]:
     if isinstance(robots, list):
         for r in robots:
             if isinstance(r, str) and r not in ALLOWED_ROBOTS:
-                errors.append(
-                    f"robots: {r!r} is not one of {sorted(ALLOWED_ROBOTS)}"
-                )
+                errors.append(f"robots: {r!r} is not one of {sorted(ALLOWED_ROBOTS)}")
 
     space = _validate_target(doc.get("target"), errors)
 
@@ -362,16 +332,12 @@ def validate_scenario(doc: Any) -> list[str]:
                 _validate_command_regulation(cmd, space, errors)
         elif stype == "random_waypoints":
             if space != "joint":
-                errors.append(
-                    "scenario_type=random_waypoints requires target.space==joint"
-                )
+                errors.append("scenario_type=random_waypoints requires target.space==joint")
             else:
                 _validate_command_random_waypoints(cmd, d, errors)
 
     if space is not None:
-        _validate_pass_criteria(
-            doc.get("pass_criteria"), space, declared_metrics, errors
-        )
+        _validate_pass_criteria(doc.get("pass_criteria"), space, declared_metrics, errors)
 
     known_top = {
         "schema_version",

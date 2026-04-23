@@ -17,7 +17,6 @@ import importlib.util
 import sys
 from pathlib import Path
 
-import pytest
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -119,10 +118,7 @@ def _seed_run_dir(
     tau_rows: list[list[float]] | None = None,
     skip_manifest: bool = False,
 ) -> Path:
-    run_dir = (
-        runs_root
-        / f"{scenario_doc['name']}__{controller}__{robot}__{timestamp}"
-    )
+    run_dir = runs_root / f"{scenario_doc['name']}__{controller}__{robot}__{timestamp}"
     run_dir.mkdir(parents=True)
     target_space = scenario_doc.get("target", {}).get("space", "joint")
     manifest = {
@@ -162,9 +158,7 @@ def _seed_run_dir(
         if target_rows is not None:
             _write_csv(run_dir / "target.csv", ["t_s"] + CANONICAL_JOINTS, target_rows)
         if observed_rows is not None:
-            _write_csv(
-                run_dir / "joint_states.csv", ["t_s"] + CANONICAL_JOINTS, observed_rows
-            )
+            _write_csv(run_dir / "joint_states.csv", ["t_s"] + CANONICAL_JOINTS, observed_rows)
     else:
         if target_rows is not None:
             _write_csv(
@@ -186,9 +180,7 @@ def test_enumerate_combos_filters_by_scenario_robots_list(tmp_path):
     doc = _regulation_scenario("reg-ur5e-only")
     doc["robots"] = ["ur5e"]  # scenario only applies to ur5e
     sp = _write_scenario(tmp_path, doc)
-    combos, inc = CMP.enumerate_combos(
-        [sp], ["simple_joint_impedance"], ["ur5e", "ur15"]
-    )
+    combos, inc = CMP.enumerate_combos([sp], ["simple_joint_impedance"], ["ur5e", "ur15"])
     assert [c.robot for c in combos] == ["ur5e"]
     assert len(inc) == 1
     assert inc[0].robot == "ur15"
@@ -232,22 +224,28 @@ def test_find_latest_run_dir_picks_newest_valid(tmp_path):
     q = [0.0] * 6
     times = [i * 0.1 for i in range(5)]
     older = _seed_run_dir(
-        runs, scenario_doc=scen, scenario_path=sp,
-        controller="simple_joint_impedance", robot="ur5e",
+        runs,
+        scenario_doc=scen,
+        scenario_path=sp,
+        controller="simple_joint_impedance",
+        robot="ur5e",
         timestamp="20260101T000000Z",
-        initial=q, target_rows=_const_rows(times, q),
+        initial=q,
+        target_rows=_const_rows(times, q),
         observed_rows=_const_rows(times, q),
     )
     newer = _seed_run_dir(
-        runs, scenario_doc=scen, scenario_path=sp,
-        controller="simple_joint_impedance", robot="ur5e",
+        runs,
+        scenario_doc=scen,
+        scenario_path=sp,
+        controller="simple_joint_impedance",
+        robot="ur5e",
         timestamp="20260102T000000Z",
-        initial=q, target_rows=_const_rows(times, q),
+        initial=q,
+        target_rows=_const_rows(times, q),
         observed_rows=_const_rows(times, q),
     )
-    found = CMP.find_latest_run_dir(
-        runs, "reg-x", "simple_joint_impedance", "ur5e"
-    )
+    found = CMP.find_latest_run_dir(runs, "reg-x", "simple_joint_impedance", "ur5e")
     assert found == newer
     assert found != older
 
@@ -261,38 +259,39 @@ def test_find_latest_run_dir_skips_invalid_newer_dir(tmp_path):
     q = [0.0] * 6
     times = [i * 0.1 for i in range(5)]
     valid = _seed_run_dir(
-        runs, scenario_doc=scen, scenario_path=sp,
-        controller="simple_joint_impedance", robot="ur5e",
+        runs,
+        scenario_doc=scen,
+        scenario_path=sp,
+        controller="simple_joint_impedance",
+        robot="ur5e",
         timestamp="20260101T000000Z",
-        initial=q, target_rows=_const_rows(times, q),
+        initial=q,
+        target_rows=_const_rows(times, q),
         observed_rows=_const_rows(times, q),
     )
     _seed_run_dir(
-        runs, scenario_doc=scen, scenario_path=sp,
-        controller="simple_joint_impedance", robot="ur5e",
+        runs,
+        scenario_doc=scen,
+        scenario_path=sp,
+        controller="simple_joint_impedance",
+        robot="ur5e",
         timestamp="20260102T000000Z",
-        initial=q, target_rows=_const_rows(times, q),
+        initial=q,
+        target_rows=_const_rows(times, q),
         observed_rows=_const_rows(times, q),
         skip_manifest=True,  # newer but not valid
     )
-    found = CMP.find_latest_run_dir(
-        runs, "reg-y", "simple_joint_impedance", "ur5e"
-    )
+    found = CMP.find_latest_run_dir(runs, "reg-y", "simple_joint_impedance", "ur5e")
     assert found == valid
 
 
 def test_find_latest_run_dir_returns_none_when_missing(tmp_path):
     runs = tmp_path / "runs"
     runs.mkdir()
-    assert (
-        CMP.find_latest_run_dir(runs, "nope", "simple_joint_impedance", "ur5e")
-        is None
-    )
+    assert CMP.find_latest_run_dir(runs, "nope", "simple_joint_impedance", "ur5e") is None
     # Also OK when runs-root doesn't exist at all.
     assert (
-        CMP.find_latest_run_dir(
-            tmp_path / "absent", "nope", "simple_joint_impedance", "ur5e"
-        )
+        CMP.find_latest_run_dir(tmp_path / "absent", "nope", "simple_joint_impedance", "ur5e")
         is None
     )
 
@@ -302,14 +301,15 @@ def test_find_latest_run_dir_returns_none_when_missing(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def _seed_pass_run(
-    runs: Path, scen: dict, sp: Path, controller: str, robot: str
-) -> Path:
+def _seed_pass_run(runs: Path, scen: dict, sp: Path, controller: str, robot: str) -> Path:
     q = [0.0, -1.5, 1.2, 0.0, 1.0, 0.0]
     times = [i * 0.1 for i in range(11)]
     return _seed_run_dir(
-        runs, scenario_doc=scen, scenario_path=sp,
-        controller=controller, robot=robot,
+        runs,
+        scenario_doc=scen,
+        scenario_path=sp,
+        controller=controller,
+        robot=robot,
         timestamp=f"20260101T00000{hash((controller, robot)) % 10}Z",
         initial=q,
         target_rows=_const_rows(times, q),
@@ -318,16 +318,17 @@ def _seed_pass_run(
     )
 
 
-def _seed_fail_run(
-    runs: Path, scen: dict, sp: Path, controller: str, robot: str
-) -> Path:
+def _seed_fail_run(runs: Path, scen: dict, sp: Path, controller: str, robot: str) -> Path:
     q = [0.0, -1.5, 1.2, 0.0, 1.0, 0.0]
     times = [i * 0.1 for i in range(11)]
     # Observed drifts 0.3 rad on shoulder_pan -> RMSE above max_rmse_rad=0.05.
     observed = [[t, q[0] + 0.3, *q[1:]] for t in times]
     return _seed_run_dir(
-        runs, scenario_doc=scen, scenario_path=sp,
-        controller=controller, robot=robot,
+        runs,
+        scenario_doc=scen,
+        scenario_path=sp,
+        controller=controller,
+        robot=robot,
         timestamp=f"20260101T00000{hash((controller, robot, 'f')) % 10}Z",
         initial=q,
         target_rows=_const_rows(times, q),
@@ -409,8 +410,11 @@ def test_run_report_cartesian_is_not_yet_evaluated_without_failure(tmp_path):
     times = [i * 0.1 for i in range(5)]
     target_rows = [[t, 0.3, 0.0, 0.4, 0.0, 0.0, 0.0, 1.0] for t in times]
     _seed_run_dir(
-        runs, scenario_doc=scen, scenario_path=sp,
-        controller="cartesian_motion", robot="ur5e",
+        runs,
+        scenario_doc=scen,
+        scenario_path=sp,
+        controller="cartesian_motion",
+        robot="ur5e",
         timestamp="20260101T000000Z",
         initial=[0.0] * 6,
         target_rows=target_rows,
@@ -462,13 +466,20 @@ def test_main_cli_exit_code_and_artefacts(tmp_path, capsys):
     runs.mkdir()
     _seed_pass_run(runs, scen, sp, "simple_joint_impedance", "ur5e")
     report_dir = tmp_path / "rep"
-    rc = CMP.main([
-        "--scenarios", str(sp),
-        "--controllers", "simple_joint_impedance",
-        "--robots", "ur5e",
-        "--runs-root", str(runs),
-        "--report-dir", str(report_dir),
-    ])
+    rc = CMP.main(
+        [
+            "--scenarios",
+            str(sp),
+            "--controllers",
+            "simple_joint_impedance",
+            "--robots",
+            "ur5e",
+            "--runs-root",
+            str(runs),
+            "--report-dir",
+            str(report_dir),
+        ]
+    )
     assert rc == 0
     assert (report_dir / "report.csv").exists()
     assert (report_dir / "report.md").exists()
@@ -481,24 +492,38 @@ def test_main_cli_rejects_unknown_controller(tmp_path, capsys):
     sp = _write_scenario(tmp_path, scen)
     runs = tmp_path / "runs"
     runs.mkdir()
-    rc = CMP.main([
-        "--scenarios", str(sp),
-        "--controllers", "not_a_controller",
-        "--robots", "ur5e",
-        "--runs-root", str(runs),
-        "--report-dir", str(tmp_path / "rep"),
-    ])
+    rc = CMP.main(
+        [
+            "--scenarios",
+            str(sp),
+            "--controllers",
+            "not_a_controller",
+            "--robots",
+            "ur5e",
+            "--runs-root",
+            str(runs),
+            "--report-dir",
+            str(tmp_path / "rep"),
+        ]
+    )
     assert rc == 2
 
 
 def test_main_cli_rejects_missing_scenario_file(tmp_path):
-    rc = CMP.main([
-        "--scenarios", str(tmp_path / "does_not_exist.yaml"),
-        "--controllers", "simple_joint_impedance",
-        "--robots", "ur5e",
-        "--runs-root", str(tmp_path / "runs"),
-        "--report-dir", str(tmp_path / "rep"),
-    ])
+    rc = CMP.main(
+        [
+            "--scenarios",
+            str(tmp_path / "does_not_exist.yaml"),
+            "--controllers",
+            "simple_joint_impedance",
+            "--robots",
+            "ur5e",
+            "--runs-root",
+            str(tmp_path / "runs"),
+            "--report-dir",
+            str(tmp_path / "rep"),
+        ]
+    )
     assert rc == 2
 
 
