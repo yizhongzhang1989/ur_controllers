@@ -49,7 +49,7 @@ run_or_dry() {
 say "stage 1: unit tests"
 if compgen -G "tests/unit/test_*.py" > /dev/null; then
     ran_any=1
-    if ! run_or_dry python3 -m pytest -q tests/unit; then
+    if ! run_or_dry python3 -m pytest -p no:anyio -q tests/unit; then
         say "unit tests FAILED"
         fail=1
     fi

@@ -1,0 +1,30 @@
+# Joint-space step on shoulder_lift_joint.
+# Reference equals initial pose for t < step_time_s, then steps by 0.1 rad.
+schema_version: 1
+name: step-shoulder-lift-0p1
+description: 0.1 rad step on shoulder_lift after a 1 s hold.
+scenario_type: step
+duration_s: 5.0
+robots: [ur5e, ur15]
+target:
+  space: joint
+  joints:
+    - shoulder_pan_joint
+    - shoulder_lift_joint
+    - elbow_joint
+    - wrist_1_joint
+    - wrist_2_joint
+    - wrist_3_joint
+command:
+  per_joint_amplitude_rad: [0.0, 0.1, 0.0, 0.0, 0.0, 0.0]
+  step_time_s: 1.0
+metrics:
+  - rmse
+  - settling_time
+  - overshoot
+  - control_effort
+pass_criteria:
+  max_rmse_rad: 0.05
+  max_settling_time_s: 1.5
+  max_overshoot_pct: 20.0
+  max_control_effort_nm: 50.0

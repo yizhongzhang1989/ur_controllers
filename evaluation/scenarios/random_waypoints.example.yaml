@@ -1,0 +1,31 @@
+# 4 random joint-space waypoints, 2 s dwell each, conservative bounds.
+schema_version: 1
+name: random-waypoints-4x2s
+description: 4 random joint-space waypoints with 2 s dwell, fixed seed.
+scenario_type: random_waypoints
+duration_s: 10.0
+robots: [ur5e, ur15]
+target:
+  space: joint
+  joints:
+    - shoulder_pan_joint
+    - shoulder_lift_joint
+    - elbow_joint
+    - wrist_1_joint
+    - wrist_2_joint
+    - wrist_3_joint
+command:
+  num_waypoints: 4
+  dwell_s: 2.0
+  seed: 42
+  bounds:
+    lower: [-0.5, -1.8, -1.5, -1.5, -1.5, -1.5]
+    upper: [ 0.5, -1.0,  1.5,  1.5,  1.5,  1.5]
+metrics:
+  - rmse
+  - settling_time
+  - control_effort
+pass_criteria:
+  max_rmse_rad: 0.10
+  max_settling_time_s: 1.5
+  max_control_effort_nm: 60.0

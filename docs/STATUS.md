@@ -1,20 +1,49 @@
 # Status
 
-_Last updated: 2026-04-23 (feat(m4): bring up cartesian_motion_controller
-on ur5e and ur15; tick M4 bullets 2, 3, 4. Full test gate green in
-~5:25.)_
+_Last updated: 2026-04-23 (feat(m5): draft scenario schema v1 +
+validator + 4 example scenarios + 35 pytest unit tests. Full test gate
+green in ~6:30.)_
 
 ## Current milestone
 
-**M4 — make `cartesian_controllers` work in sim: IN PROGRESS.** M0–M3
-done. M4 bullets 1–4 done this iteration (primary mode
-`cartesian_motion_controller` brought up on both arms with regulation
-integration tests). Only the optional bullet 5 (second cartesian mode)
-remains, and it is blocked on the sim gaining an `ft_sensor_ref_link`
-plus an `~/ft_sensor_wrench` publisher on the `auto_dev` branch of the
-sim submodule — same open question already flagged below.
+**M5 — evaluation and comparison harness: IN PROGRESS.** M0–M3 done.
+M4 bullets 1–4 done; the optional M4 bullet 5 (second cartesian mode)
+is parked on a human gate (sim F/T sensor patch on `auto_dev` —
+unchanged from prior iteration). M5 bullet 1 done this iteration:
+declarative scenario schema v1 lives in `evaluation/scenarios/`
+(README spec + stdlib+PyYAML validator + 4 example YAMLs covering
+step / sine / regulation / random_waypoints), exercised by 35
+`tests/unit/test_scenarios_schema.py` cases.
 
 Key observations from this iteration (relevant for future work):
+
+- **Scenario schema v1 design choices** (see `evaluation/scenarios/README.md`
+  for the full spec). Two shapes that future M5 bullets must respect:
+  1. `target` describes *what* is being commanded (space, joints / frame +
+     end_effector); `command` carries the *how* (per-`scenario_type`
+     parameters). They were deliberately split so adding new
+     scenario_types later (e.g. `trajectory`, `chirp`) does not require
+     touching `target`.
+  2. Cartesian targets are accepted in v1 only for `scenario_type:
+     regulation` (position + unit quaternion in `target.frame_id`).
+     `step`, `sine`, and `random_waypoints` are joint-only because their
+     cartesian variants need explicit interpolation + frame semantics
+     that we have not committed to. When `cartesian_motion_controller`
+     starts being driven by the M5 harness, regulation is enough for
+     a comparison test; richer cartesian scenarios will land in a
+     schema v2 with a new ADR.
+  3. Per-joint amplitudes are required as a length-6 vector (canonical
+     UR joint order). Scalar `amplitude_rad` is rejected because it
+     leaves the active joint ambiguous.
+  4. Time consistency is validated up front: `step_time_s < duration_s`
+     and `num_waypoints * dwell_s <= duration_s`. Pass-criteria keys
+     must each map to a metric listed under `metrics` (so a threshold
+     can never reference a metric that nothing computes).
+- **`scripts/run_tests.sh` stage 1 now passes `-p no:anyio`.** This was
+  required because the system pytest-anyio plugin is incompatible with
+  our pinned pytest version (already worked around in stage 3 for
+  integration tests). With `tests/unit/` now populated, stage 1 needed
+  the same flag.
 
 - **`robot_description` propagation gotcha.** On Humble 2.53, the
   controller manager propagates its own `robot_description` param
@@ -37,6 +66,16 @@ Key observations from this iteration (relevant for future work):
 
 ## Last completed tasks
 
+- **M5 bullet 1: `evaluation/scenarios/*.yaml` schema v1.** New files:
+  `evaluation/scenarios/README.md` (full schema spec),
+  `evaluation/scenarios/validate.py` (PyYAML + stdlib validator with a
+  CLI entrypoint), four committed example scenarios
+  (`step`, `sine`, `regulation`, `random_waypoints`),
+  `tests/unit/test_scenarios_schema.py` (35 cases: positive + per-rule
+  negative + YAML-load failure paths). The validator is deliberately
+  controller-agnostic and arm-agnostic so M5 bullets 2–4 can drive
+  every controller already wired in M2–M4 from the same scenario file.
+  See ADR-0009 for the design rationale.
 - **M4 bullets 2 + 3 + 4: `cartesian_motion_controller` brought up on
   ur5e and ur15 with regulation integration test.** New files:
   `bringup/config/cartesian_motion.{ur5e,ur15}.yaml`,
@@ -68,24 +107,22 @@ Key observations from this iteration (relevant for future work):
 
 ## Next task (agent should pick this up)
 
-**M4 optional bullet 5: wire a second cartesian mode if time permits.**
-Candidates are `cartesian_compliance_controller` and
-`cartesian_force_controller`. Both require an `ft_sensor_ref_link` on
-the URDF chain between `robot_base_link` and `end_effector_link` plus
-an `~/ft_sensor_wrench` publisher. The UR sim does not currently
-expose an F/T sensor link, so this bullet first needs a sim-side
-`auto_dev` patch (xacro addition of a zero-offset sensor frame at
-`tool0` or just before `flange`, plus either a stub F/T publisher or
-wiring the MuJoCo contact-force sensor). **Human gate per AGENTS.md
-§7** — the patch touches the simulator's URDF and sensor publishing
-pipeline, so the operator should confirm they want the sim to grow an
-F/T sensor before we enter this bullet.
+**M5 bullet 2: `evaluation/run_evaluation.py`.** Take a scenario YAML
+(validated by `evaluation/scenarios/validate.py`), a controller name
+(one of the bring-ups already wired in M2–M4), and a robot
+(`ur5e`|`ur15`); launch the sim + the chosen controller, drive
+`/target_joint` (joint-space scenarios) or the relevant cartesian
+target topic per the scenario's `command`, record `/joint_states` +
+the controller's `~/tau_d` topic, and emit a CSV under
+`evaluation/runs/<scenario>__<controller>__<robot>__<timestamp>/`
+(plus a `manifest.yaml` mirroring the existing
+`evaluation/baselines/crisp/*.manifest.yaml` shape). Metrics
+computation (M5 bullet 3) and the comparison report (M5 bullet 4)
+build on top of this. Reference for the launch+swap pattern: existing
+`bringup/launch/{crisp,simple_jimp,cartesian}_bringup.launch.py`.
 
-If bullet 5 is deferred, the next highest-value item is **M5 bullet 1:
-draft the `evaluation/scenarios/*.yaml` schema** (step, sine,
-regulation, random waypoints). That is a pure-docs/spec task and does
-not block on M4 bullet 5 landing — M5 will exercise the crisp + simple
-joint-impedance + cartesian_motion controllers already wired today.
+M4 bullet 5 (second cartesian mode) remains deferred behind a
+**human gate** (sim-side F/T sensor patch on `auto_dev`).
 
 ## Build status
 
@@ -93,17 +130,18 @@ joint-impedance + cartesian_motion controllers already wired today.
 - `colcon build --symlink-install --base-paths src third_party
   --packages-skip cartesian_controller_simulation cartesian_controller_tests`
   produces **10** packages successfully, unchanged from prior
-  iteration (no new packages added — this iteration only touched
-  `bringup/` and `tests/integration/`).
+  iteration (no new ROS packages added — this iteration only touched
+  `evaluation/`, `tests/unit/`, `scripts/run_tests.sh`, and docs).
 
 ## Test status
 
 - `scripts/run_tests.sh` runs unit → colcon test → integration. Green
-  in ~5:25 this iteration (12 integration tests: 10 prior + 2 new
-  `test_cartesian_motion_regulation[{ur5e,ur15}]`).
-- Test counts: **22** `test_math` gtests
-  (simple_joint_impedance_controller) + 5 `crisp_controllers` gtests
-  + **12** integration tests (sim smoke + 3 crisp roles + our
+  in ~6:30 this iteration (35 new unit tests + same 27 colcon gtests +
+  same 12 integration tests).
+- Test counts: **35** pytest unit tests
+  (`tests/unit/test_scenarios_schema.py`) + **22** `test_math` gtests
+  (simple_joint_impedance_controller) + **5** `crisp_controllers`
+  gtests + **12** integration tests (sim smoke + 3 crisp roles + our
   simple_joint_impedance_controller + `cartesian_motion_controller`,
   each ×{ur5e, ur15}).
 

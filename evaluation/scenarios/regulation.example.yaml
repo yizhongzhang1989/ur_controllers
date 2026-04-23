@@ -1,0 +1,25 @@
+# Hold the initial pose for 10 s. Same scenario as the existing crisp
+# baseline rosbags under evaluation/baselines/crisp/.
+schema_version: 1
+name: regulation-hold-initial
+description: Hold the initial joint configuration for 10 s.
+scenario_type: regulation
+duration_s: 10.0
+robots: [ur5e, ur15]
+target:
+  space: joint
+  joints:
+    - shoulder_pan_joint
+    - shoulder_lift_joint
+    - elbow_joint
+    - wrist_1_joint
+    - wrist_2_joint
+    - wrist_3_joint
+command:
+  hold: initial
+metrics:
+  - rmse
+  - control_effort
+pass_criteria:
+  max_rmse_rad: 0.15
+  max_control_effort_nm: 50.0

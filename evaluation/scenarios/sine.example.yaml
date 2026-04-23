@@ -1,0 +1,26 @@
+# Joint-space sine on shoulder_lift_joint, 0.05 rad amplitude, 0.5 Hz.
+schema_version: 1
+name: sine-shoulder-lift-0p05-0p5hz
+description: 0.05 rad / 0.5 Hz sine on shoulder_lift, others held.
+scenario_type: sine
+duration_s: 10.0
+robots: [ur5e, ur15]
+target:
+  space: joint
+  joints:
+    - shoulder_pan_joint
+    - shoulder_lift_joint
+    - elbow_joint
+    - wrist_1_joint
+    - wrist_2_joint
+    - wrist_3_joint
+command:
+  per_joint_amplitude_rad: [0.0, 0.05, 0.0, 0.0, 0.0, 0.0]
+  frequency_hz: 0.5
+  phase_rad: 0.0
+metrics:
+  - rmse
+  - control_effort
+pass_criteria:
+  max_rmse_rad: 0.03
+  max_control_effort_nm: 50.0

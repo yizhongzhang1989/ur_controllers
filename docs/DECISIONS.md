@@ -319,3 +319,58 @@ Format: ADR-lite. Do not delete past entries; supersede with a new one.
     does **not** pre-approve that change, only flags it as the first
     extension to consider.
 
+
+---
+
+## ADR-0009 — Evaluation scenario schema v1 (M5)
+
+- **Date:** 2026-04-23
+- **Status:** Accepted
+- **Context:** ROADMAP M5 needs a declarative way to describe evaluation
+  scenarios so the same file drives every controller from M2–M4
+  (`crisp_*`, `simple_joint_impedance_controller`,
+  `cartesian_motion_controller`) on both `ur5e` and `ur15` (per ADR-0004).
+  M5 bullet 1 is the schema; bullets 2–4 are the runner, the metrics, and
+  the comparison report. The schema must therefore be controller-agnostic
+  and arm-agnostic, mechanically validatable, and stable enough that
+  bullets 2–4 do not force a schema rev.
+- **Decision:**
+  - Schema lives in `evaluation/scenarios/README.md` and is enforced by
+    `evaluation/scenarios/validate.py` (PyYAML + stdlib only — no
+    `jsonschema` dep). Schema version is an explicit `schema_version: 1`
+    integer field; future incompatible changes bump this and supersede
+    this ADR.
+  - Top-level shape splits **what** is being commanded (`target`: space,
+    joints / frame + end_effector) from **how** it is being driven
+    (`command`: per-`scenario_type` parameters). New scenario_types
+    can be added without touching `target`.
+  - `scenario_type` is one of `step | sine | regulation |
+    random_waypoints`. `step`, `sine`, `random_waypoints` are
+    joint-space only in v1. `regulation` accepts both joint and
+    cartesian targets; cartesian regulation is specified as
+    `position_xyz_m` + unit `orientation_xyzw` in `target.frame_id`.
+    Cartesian step / sine / random are deferred — they need explicit
+    interpolation + frame semantics that we have not committed to and
+    that no current bring-up exercises.
+  - Joint vectors are always length 6 in the canonical UR joint order
+    (`shoulder_pan, shoulder_lift, elbow, wrist_1..3`). Scalar
+    `amplitude_rad` is **rejected** for `step` / `sine` because it
+    leaves the active joint ambiguous; `per_joint_amplitude_rad: list[6]`
+    with zeros for inactive joints is the only accepted form.
+  - Time consistency is validated up front: `step_time_s < duration_s`
+    and `num_waypoints * dwell_s <= duration_s`.
+  - `pass_criteria` keys (e.g. `max_settling_time_s`) must each map to
+    a metric listed under `metrics`, so a threshold can never reference
+    a metric that nothing computes. Joint vs cartesian thresholds are
+    enforced separately (`max_rmse_rad` vs `max_rmse_m`).
+- **Consequences:**
+  - M5 bullets 2–4 read scenarios via the same loader; per-scenario_type
+    dispatch is a `match` on `scenario_type` once validation has passed.
+  - Adding a new scenario_type or a new metric is a single change to
+    `validate.py` + a new bullet in `README.md`; existing files keep
+    working because the validator does not reject *unknown* scenario_type
+    only at top-level (it does — see "rejected"), forcing the rev to
+    pass through this ADR-replacement gate.
+  - The validator is exercised by `tests/unit/test_scenarios_schema.py`
+    (35 cases). Adding cartesian step/sine/random later will require a
+    new ADR superseding this one and bumping `schema_version` to 2.
