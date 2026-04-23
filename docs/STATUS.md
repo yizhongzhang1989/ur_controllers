@@ -1,132 +1,117 @@
 # Status
 
-_Last updated: 2026-04-23 (build(m0): `.pre-commit-config.yaml` (clang-format,
-ruff, trailing whitespace) + `.clang-format` (LLVM base) + `ruff.toml`
-(py310 target). Tree brought into compliance in the same commit; 21 source
-files reformatted by ruff/clang-format. New unit test
-`tests/unit/test_pre_commit_config.py` (12 cases) pins the structure. Full
-test gate green in ~8:00.)_
+_Last updated: 2026-04-23 (ci(m0): `.github/workflows/ci.yml` two-job
+pipeline (`lint` → `build`) wiring the pre-commit gate + colcon build +
+unit-test gate. Pinned by `tests/unit/test_ci_workflow.py` (12 cases).
+Full local test gate green in ~7:50.)_
 
 ## Current milestone
 
-**M0 — bootstrap: 2 unchecked items remaining** (CI workflow,
-`scripts/setup_env.sh`). M0 bullet "add `.pre-commit-config.yaml`" closed
-this iteration. Per ROADMAP rule "agent works on the earliest milestone
-that has unchecked items", M0 keeps priority over M2–M5 follow-ups.
+**M0 — bootstrap: 1 unchecked item remaining** (`scripts/setup_env.sh`).
+M0 bullet "CI workflow" closed this iteration. Per ROADMAP rule "agent
+works on the earliest milestone that has unchecked items", M0 keeps
+priority over M2–M5 follow-ups.
 
 M2–M4 done (with M4 bullet 5 still parked behind a human gate for the
 sim F/T sensor patch). M5 bullets 1–4 are all ticked. M-REAL is
 explicitly out-of-scope until operator approval.
 
-This iteration tackled M0 bullet 2 (`.pre-commit-config.yaml`). Approach:
+This iteration tackled M0 bullet "CI workflow `.github/workflows/ci.yml`".
+Approach:
 
-1. **`.pre-commit-config.yaml`** at repo root with three hook
-   families per AGENTS.md §4:
-   - `pre-commit/pre-commit-hooks` v5.0.0 — `trailing-whitespace`,
-     `end-of-file-fixer`, `check-yaml` (with `--allow-multiple-documents
-     --unsafe` so ROS launch/param YAML with custom tags doesn't false-
-     positive), `check-merge-conflict`, `check-added-large-files`
-     (`--maxkb=1024`).
-   - `astral-sh/ruff-pre-commit` v0.6.9 — `ruff --fix` then
-     `ruff-format`. Configured by repo-root `ruff.toml` (line-length
-     100, target-version py310, rule families `E,F,W,I`, `E501`
-     ignored because `ruff format` already enforces line length).
-   - `pre-commit/mirrors-clang-format` v18.1.8 — runs against C++/C
-     files. Configured by repo-root `.clang-format` (BasedOnStyle:
-     LLVM, ColumnLimit 100, IndentWidth 4, PointerAlignment Left,
-     SortIncludes off — touching `#include` order would churn every
-     file we own without a corresponding test win).
-2. **Excludes** the read-only submodules under `third_party/`
-   (ADR-0003), all colcon build artefacts (`build/`, `install/`,
-   `log/`, `.auto_dev_logs/`), and the gitignored evaluation outputs
-   (`evaluation/runs/`, `evaluation/reports/`, baseline `*.bag/` and
-   `*.mcap/` payloads). Encoded as a verbose-regex `exclude:` so the
-   rule lives in one place and is structurally testable.
-3. **Brought the tree into compliance in the same commit.** First
-   `pre-commit run --all-files` reformatted 21 files (4 ruff lint
-   auto-fixes + 18 ruff-format reformats + every C++ file
-   re-flowed by clang-format). Re-ran until all hooks pass; verified
-   `colcon build` green and `scripts/run_tests.sh` green (122 unit
-   + 12 integration + 30 colcon gtests, ~8 min total). The
-   reformat-and-introduce-config split would have left the repo in
-   a "config but tree is dirty" state for one commit which is not
-   useful — single commit is one logical change.
-4. **Unit test `tests/unit/test_pre_commit_config.py` (12 cases)**:
-   pins repos block present; required hooks (`trailing-whitespace`,
-   `ruff`, `ruff-format`, `clang-format`) all configured; exclude
-   pattern mentions `third_party/`, `build/`, `install/`, `log/`;
-   `.clang-format` exists with `BasedOnStyle: LLVM`; `ruff.toml`
-   exists with `target-version = "py310"`; every external repo has
-   a non-empty `rev`. The test does not invoke `pre-commit` itself
-   — that requires network for hook installs and is too slow for
-   the unit gate. The CI workflow (next M0 bullet) is the right
-   place to actually exercise `pre-commit run --all-files`.
+1. **Two-job split.** `lint` runs first on `ubuntu-22.04` with no ROS:
+   `actions/setup-python@v5` (3.10), `pip install pre-commit ruff`,
+   then `pre-commit run --all-files --show-diff-on-failure`. A
+   `actions/cache@v4` step keyed on `.pre-commit-config.yaml` keeps
+   hook installs warm between runs. `build` then runs inside the
+   `ros:humble-ros-base` container (matches ADR-0002 — Humble on
+   22.04), depends on `lint` via `needs:`, and is the only job that
+   pays the rosdep + colcon-build cost.
+2. **Build job pipeline.** `actions/checkout@v4` with
+   `submodules: recursive`, then `apt-get install` the colcon /
+   rosdep / pytest tooling, then `rosdep install --from-paths src
+   third_party` with the ADR-0005 `--skip-keys` (matching the
+   `colcon_defaults.yaml` `--packages-skip` list — otherwise rosdep
+   would try to resolve the MuJoCo-and-catkin deps of
+   `cartesian_controller_simulation` /
+   `cartesian_controller_tests`). Then `colcon build` (defaults file
+   auto-loaded from cwd) and `scripts/run_tests.sh --unit-only`.
+3. **Why `--unit-only` and not the full test gate.** `scripts/run_tests.sh`
+   stage 3 is `tests/integration/`, all of which spawn `launch_sim.sh`
+   to drive a live MuJoCo sim. That requires GPU/audio/etc. inside the
+   container and ~7 minutes of runtime per matrix entry; it is not
+   suitable for the headless CI gate. Once a sim-in-CI story lands
+   (e.g. xvfb + headless MuJoCo) the integration tests can be added in
+   a follow-up workflow without touching this one.
+4. **Triggers.** `push` and `pull_request` on `auto_dev` and `main`,
+   plus `workflow_dispatch` so an operator can re-run on demand. The
+   `.github/workflows/ci.yml` file itself is matched by the path filters
+   so a workflow edit is exercised on its own PR.
+5. **Unit test `tests/unit/test_ci_workflow.py` (12 cases)**: pins the
+   workflow's name + triggers, the existence of both jobs, the
+   container image targeting `humble`, the submodule-checkout flag, the
+   `pre-commit run --all-files` invocation, the `colcon build` step,
+   the `scripts/run_tests.sh --unit-only` step, the `rosdep install`
+   step with the ADR-0005 skip-keys, the `needs: lint` dependency, and
+   `runs-on: ubuntu-22.04` for both jobs. Same testing pattern as
+   `tests/unit/test_pre_commit_config.py` from the previous iteration:
+   load the YAML and assert structure, do not invoke `act` or any
+   GitHub-hosted runner.
 
 Key non-obvious points:
 
-- **Tools are not on the host PATH by default.** `pre-commit`, `ruff`
-  and `clang-format` are not installed system-wide on the dev box;
-  this iteration installed `pre-commit` + `ruff` to `~/.local/bin`
-  (`pip install --user`). `clang-format` is supplied by the
-  `pre-commit/mirrors-clang-format` hook via its own pinned binary,
-  so the host does not need an apt-installed `clang-format`. The
-  upcoming `scripts/setup_env.sh` (M0 bullet 3) should `pip install
-  pre-commit ruff` to make the workflow reproducible.
-- **`SortIncludes: false`** in `.clang-format` is deliberate. The
-  default LLVM behaviour reorders `#include` blocks; flipping that on
-  in a code base where include order sometimes carries semantic
-  weight (e.g. ros2_control plugin macros) would force a churny
-  manual review with no testable benefit. Re-enable in a follow-up
-  iteration if it ever becomes a problem.
-- **Ruff's `E501` is intentionally ignored.** `ruff format` already
-  enforces line length (100); having the linter also flag E501 just
-  produces noise on lines `format` chose not to break (e.g. long
-  string literals). This matches the upstream `astral-sh` guidance.
-- **`check-yaml` runs with `--unsafe --allow-multiple-documents`.**
-  ROS launch and param YAMLs occasionally use custom tags or
-  multi-document streams; the safe default would false-positive
-  on legitimate files. The hook still catches malformed YAML.
+- **PyYAML parses the bare `on:` key as Python `True`.** The unit test
+  guards `workflow.get("on") if "on" in workflow else workflow.get(True)`
+  so the assertion stays robust against `safe_load`'s YAML 1.1
+  treatment of `on` as a boolean. (PyYAML 6.x still does this; YAML 1.2
+  loaders would not, but PyYAML is what the rest of the unit gate
+  uses, see the `python deps` repo memory.)
+- **`needs: lint` is intentional.** A red `pre-commit` should short-
+  circuit the (much more expensive) build job. The override is the
+  `workflow_dispatch` trigger, which still respects `needs:` ordering
+  — operators can't bypass the lint gate from the GH UI without
+  editing the workflow.
+- **Container image is `ros:humble-ros-base`, not `ros:humble`.**
+  `ros-base` excludes the desktop/GUI stack (rviz, gz, etc.), which
+  saves ~1 GB of image pull and is irrelevant for headless build +
+  unit tests. Anything controller-side that the unit tests need is
+  already pulled in by `ros_core` + the rosdep step.
+- **`rosdep init` is conditional.** The `ros:humble-ros-base` image
+  ships with rosdep already initialised; calling `rosdep init` again
+  errors out. The `if [ ! -f ... ]` guard keeps the step idempotent
+  in case the base image ever changes.
+- **The workflow does not push or release anything.** It is a pure
+  read-only gate. `permissions: contents: read` documents that.
 
 ## Last completed tasks
 
-- **M0 bullet 2: `.pre-commit-config.yaml`.** Three hook families
-  (clang-format, ruff, trailing-whitespace + friends) with pinned
-  revs, repo-root `.clang-format` (LLVM base) and `ruff.toml` (py310,
-  rules `E,F,W,I`). Tree brought into compliance in the same commit
-  (21 files reformatted). New unit test
-  `tests/unit/test_pre_commit_config.py` (12 cases) pins structure.
-  ROADMAP M0 bullet ticked.
-- **M0 bullet 1: top-level colcon workspace config.** See prior STATUS.
+- **M0 bullet "CI workflow `.github/workflows/ci.yml`".** Two-job
+  pipeline (`lint` → `build`) wiring pre-commit, rosdep, colcon
+  build, and `scripts/run_tests.sh --unit-only`. Pinned by 12 unit
+  tests in `tests/unit/test_ci_workflow.py`. ROADMAP M0 bullet ticked.
+- **M0 bullet `.pre-commit-config.yaml`.** See prior STATUS.
+- **M0 bullet top-level colcon workspace config.** See prior STATUS.
 - **M5 bullet 4: `evaluation/compare.py`.** See prior STATUS.
 - **M5 bullet 3: `evaluation/compute_metrics.py`.** See prior STATUS.
 - **M5 bullet 2: `evaluation/run_evaluation.py`.** See prior STATUS.
 - **M5 bullet 1: `evaluation/scenarios/*.yaml` schema v1.** See prior STATUS.
 - **M4 bullets 2 + 3 + 4: `cartesian_motion_controller` brought up on
   ur5e and ur15 with regulation integration test.** See prior STATUS.
-- **M4 kick-off: `docs/cartesian_controllers.md` reference + tick M4
-  bullet 1 (build).** See prior STATUS.
 - **M3 — sim bring-up + regulation integration test for
   `simple_joint_impedance_controller` on `{ur5e, ur15}`.** See prior
   STATUS.
 
 ## Next task (agent should pick this up)
 
-**M0 has 2 unchecked bullets remaining**, in order:
+**M0 has 1 unchecked bullet remaining**:
 
-1. **CI workflow `.github/workflows/ci.yml`**: build + unit tests
-   headless. Should source ROS Humble, install `pre-commit` + `ruff`
-   (`pip install pre-commit ruff`), run `pre-commit run --all-files`
-   as the first gate, then `colcon build` (defaults file supplies
-   the flags), then `scripts/run_tests.sh --unit-only` (integration
-   tests need a running sim — defer until a sim-in-CI story lands).
-   The workflow is the natural place to *enforce* the pre-commit
-   contract added this iteration.
-2. **`scripts/setup_env.sh`**: thin wrapper around `apt`/`rosdep` to
+1. **`scripts/setup_env.sh`**: thin wrapper around `apt`/`rosdep` to
    install the prerequisites listed in README.md "Prerequisites".
    Idempotent; safe to re-run. Add a `--dry-run` mode mirroring
    `scripts/run_tests.sh`. Should also `pip install --user pre-commit
    ruff` so a fresh checkout can run the new pre-commit hooks without
-   hunting for pip incantations.
+   hunting for pip incantations. Optional: `pre-commit install` so the
+   local git-hook is wired automatically.
 
 After M0 is fully ticked, the only remaining roadmap items are
 **human-gated**:
@@ -140,6 +125,9 @@ After M0 is fully ticked, the only remaining roadmap items are
 
 Suggested follow-ups (not blocking the outer loop but useful):
 
+- A second CI job (or a separate workflow) that runs the integration
+  tests behind an `xvfb` / headless-MuJoCo wrapper, once that story
+  exists. The current workflow deliberately stops at unit tests.
 - Live-dispatch mode for `compare.py` (subprocess
   `run_evaluation.py` per compatible combo) so the comparison is
   one command end-to-end once an operator is happy to pay the
@@ -150,41 +138,36 @@ Suggested follow-ups (not blocking the outer loop but useful):
   `not_yet_evaluated` rows into real numbers. Needs either
   `pinocchio` (already pulled in by crisp) or `tf2_ros` transform
   lookups during the run.
-- Wire `pre-commit install` into `scripts/setup_env.sh` once it
-  exists, so contributors get the local git-hook automatically.
 
 ## Build status
 
 - ROS 2 distro: **Humble** (Ubuntu 22.04, matches system install).
 - `colcon build` (from the repo root, picking up
   `colcon_defaults.yaml`) produces **10** packages successfully,
-  unchanged from prior iteration. `simple_joint_impedance_controller`
-  rebuilt cleanly after clang-format reflowed every C++ file in the
-  package.
+  unchanged from prior iteration.
 
 ## Test status
 
 - `scripts/run_tests.sh` runs unit → colcon test → integration. Green
-  in ~8:00 this iteration (35 schema + 34 runner-dry-run + 32
-  metrics + 15 compare + 6 colcon-defaults + **12 new
-  pre-commit-config** unit tests = 134 pytest unit tests; 27 colcon
-  gtests; 12 integration tests).
-- Test counts: **134** pytest unit tests + **22** `test_math` gtests
+  in ~7:50 this iteration (35 schema + 34 runner-dry-run + 32
+  metrics + 15 compare + 6 colcon-defaults + 12 pre-commit-config +
+  **12 new ci-workflow** unit tests = 146 pytest unit tests; 27
+  colcon gtests; 12 integration tests).
+- Test counts: **146** pytest unit tests + **22** `test_math` gtests
   (simple_joint_impedance_controller) + **5** `crisp_controllers`
   gtests + **12** integration tests (sim smoke + 3 crisp roles + our
   simple_joint_impedance_controller + `cartesian_motion_controller`,
   each ×{ur5e, ur15}).
 - `pre-commit run --all-files` exits 0 against the current tree
-  (verified this iteration). Hook installs are network-dependent on
-  first run (~1 min on a warm cache); the unit-test gate
-  deliberately does not invoke `pre-commit`.
+  (verified this iteration on the new files via `--files`).
 
 ## Blockers / open questions for operator
 
 None currently blocking. Informational:
 
-- ROS distro pinned to Humble (system install); formalise via ADR
-  if/when a second distro becomes a candidate.
+- ROS distro pinned to Humble (system install); formalised via
+  ADR-0002. The new CI workflow targets the same distro via the
+  `ros:humble-ros-base` container image.
 - Dashboard opens at `http://localhost:8000`; rosbridge at
   `ws://localhost:9090`. Both are pkill'd + port-cleared by
   `scripts/kill_sim.sh`.
@@ -203,9 +186,14 @@ None currently blocking. Informational:
 - `compare.py --aggregate-only` is the only mode implemented; live
   matrix dispatch is deferred behind a future `--live` flag.
 - `pre-commit`, `ruff`, and the hook-bundled `clang-format` are not
-  yet installed by any setup script. Until M0 bullet `setup_env.sh`
-  lands, contributors must `pip install --user pre-commit ruff`
-  manually before `pre-commit run --all-files` will work.
+  yet installed by any setup script. The CI workflow now installs
+  them in the `lint` job, but local contributors must still
+  `pip install --user pre-commit ruff` until the M0 `setup_env.sh`
+  bullet lands.
+- CI does not yet exercise integration tests — they require a live
+  MuJoCo sim that we have no headless story for. The workflow stops
+  at `--unit-only` deliberately; a follow-up can add an integration
+  job once headless sim is sorted.
 
 ## Recent commits
 

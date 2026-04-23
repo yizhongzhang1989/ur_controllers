@@ -44,7 +44,15 @@ Cross-cutting rules:
       are excluded. Tree was brought into compliance in the same commit
       (`pre-commit run --all-files` exits 0). Pinned by 12 unit tests in
       `tests/unit/test_pre_commit_config.py`.
-- [ ] Add CI workflow `.github/workflows/ci.yml`: build + unit tests headless.
+- [x] Add CI workflow `.github/workflows/ci.yml`: build + unit tests headless.
+      Two-job workflow (`lint` → `build`): the `lint` job runs
+      `pre-commit run --all-files` on `ubuntu-22.04` (no ROS); the
+      `build` job runs inside the `ros:humble-ros-base` container,
+      `rosdep install`s with the ADR-0005 skip-keys, then
+      `colcon build` (defaults file supplies the rest), then
+      `scripts/run_tests.sh --unit-only`. Integration tests stay out
+      of CI until a sim-in-CI story lands. Pinned by 12 unit tests in
+      `tests/unit/test_ci_workflow.py`.
 - [ ] Write `scripts/setup_env.sh` to install ROS deps via `rosdep`.
 
 ## M1 — Simulator brings up UR5e and UR15

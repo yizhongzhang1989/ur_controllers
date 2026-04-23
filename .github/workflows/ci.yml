@@ -1,0 +1,111 @@
+name: ci
+
+# Headless build + unit-test gate for the ur_controllers workbench.
+#
+# Two jobs:
+#   1. lint  — runs `pre-commit run --all-files` (clang-format, ruff,
+#              trailing-whitespace + friends). Does not need ROS.
+#   2. build — `colcon build` (skip list comes from `colcon_defaults.yaml`)
+#              followed by `scripts/run_tests.sh --unit-only`. Integration
+#              tests require a live MuJoCo sim and are deliberately not
+#              exercised here (see docs/STATUS.md for the sim-in-CI gap).
+#
+# See ROADMAP M0 bullet "CI workflow" and STATUS plan.
+
+on:
+  push:
+    branches: [auto_dev, main]
+  pull_request:
+    branches: [auto_dev, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: pre-commit
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install pre-commit and ruff
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install pre-commit ruff
+
+      - name: Cache pre-commit hook installs
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
+
+      - name: Run pre-commit
+        run: pre-commit run --all-files --show-diff-on-failure
+
+  build:
+    name: colcon build + unit tests
+    runs-on: ubuntu-22.04
+    needs: lint
+    container:
+      image: ros:humble-ros-base
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Install build tooling
+        shell: bash
+        run: |
+          set -euxo pipefail
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            python3-pip \
+            python3-colcon-common-extensions \
+            python3-colcon-defaults \
+            python3-rosdep \
+            python3-vcstool \
+            python3-pytest \
+            python3-yaml \
+            git \
+            build-essential
+
+      - name: rosdep install
+        shell: bash
+        run: |
+          set -euxo pipefail
+          if [ ! -f /etc/ros/rosdep/sources.list.d/20-default.list ]; then
+            rosdep init
+          fi
+          rosdep update
+          # Skip the same packages that ADR-0005 strips from the colcon build
+          # so rosdep does not try to resolve their MuJoCo / catkin deps.
+          rosdep install --from-paths src third_party --ignore-src -r -y \
+            --skip-keys "cartesian_controller_simulation cartesian_controller_tests"
+
+      - name: colcon build
+        shell: bash
+        run: |
+          set -euxo pipefail
+          source /opt/ros/humble/setup.bash
+          # colcon_defaults.yaml at the repo root supplies --symlink-install,
+          # --base-paths src third_party, and the ADR-0005 --packages-skip list.
+          colcon build
+
+      - name: Unit tests (scripts/run_tests.sh --unit-only)
+        shell: bash
+        run: |
+          set -euxo pipefail
+          source /opt/ros/humble/setup.bash
+          source install/setup.bash
+          scripts/run_tests.sh --unit-only
