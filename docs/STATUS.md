@@ -1,82 +1,85 @@
 # Status
 
-_Last updated: 2026-04-23 (M2 closed: crisp baseline rosbags recorded for
-all 3 roles × {ur5e, ur15}; manifests committed under
-`evaluation/baselines/crisp/`. Next: M3 — our own simplified joint
-impedance controller)._
+_Last updated: 2026-04-23 (M3 kicked off: ADR-0008 scopes the simplified
+joint impedance controller — keep vs drop split for what we take from
+crisp's joint-impedance role. Next: create
+`src/simple_joint_impedance_controller/` package skeleton)._
 
 ## Current milestone
 
-**M2 — `crisp_controllers` in sim: DONE.** M1 is done. All three
-configuration roles of `crisp_controllers/CartesianController`
-(`joint_impedance_controller`, `cartesian_impedance_controller`,
-`gravity_compensation`) are brought up end-to-end on `ur5e` and `ur15`
-via `bringup/launch/crisp_bringup.launch.py`
-(`mode:={joint,cartesian,gravity}`) with per-arm YAML under
-`bringup/config/`. Integration tests (`tests/integration/test_crisp_*.py`)
-assert bounded joint-space drift on both arms for each role. Baseline
-rosbags for each of the 6 role×arm combinations are recorded by
-`scripts/record_crisp_baseline.sh` (one-shot; not part of
-`run_tests.sh`); payloads live under `evaluation/baselines/crisp/*.bag/`
-(gitignored) and per-combination manifests
-(`evaluation/baselines/crisp/<role>_<robot>.manifest.yaml`) are
-committed. Next milestone: **M3 — our own simplified joint impedance
-controller**. Priority order after M3: M4 (cartesian controllers), M5
-(evaluation harness). Every sim task must pass on both `ur5e` and
-`ur15`. Real UR15 is explicitly out of scope.
+**M3 — our own simplified joint impedance controller: IN PROGRESS.**
+M0–M2 are done. The first M3 item ("Study crisp joint impedance and
+record keep-vs-drop in DECISIONS.md") is now ticked in
+`docs/ROADMAP.md`; the choice is captured as **ADR-0008** in
+`docs/DECISIONS.md`. Summary of the ADR: keep a minimal joint-space
+PD (`tau = K (q_d - q) - D qdot`) with per-joint gains, torque and
+torque-rate saturation, `target_joint` subscription seeded to the
+measured `q` on activation, URDF-limit clamping on `q_d`, a `~/tau_d`
+diagnostics publisher, and parameters via
+`generate_parameter_library`; drop the Cartesian/OSC branch, pinocchio
+and all model-based terms (gravity, Coriolis, nullspace projectors,
+Jacobian), Franka-tuned friction model, EMA filters, soft
+joint-limit-repulsion, per-axis error clipping, noise injection,
+logging / introspection knobs, and the `stop_commands` flag. Gravity
+compensation is explicitly flagged as the first extension to consider
+if the integration test can't hold against gravity on either arm; if
+so, it lands as a follow-up ADR, not silently. Priority order remains:
+M3 → M4 (cartesian controllers) → M5 (evaluation harness). M-REAL
+stays out of scope.
 
 ## Last completed tasks
 
-- **M2 baseline rosbags + manifests.** Added
-  `scripts/record_crisp_baseline.sh <role> <robot> [duration_s]` which,
-  for one role × arm combination, clears stale sim state, launches the
-  MuJoCo sim (`scripts/launch_sim.sh <robot> effort`), waits for
-  `joint_state_broadcaster` + `forward_effort_controller` active,
-  launches `crisp_bringup.launch.py` with the matching `mode:=`, waits
-  for the role controller to become the sole active effort commander,
-  optionally publishes `/target_joint` at the current joint config for
-  the joint role (the cartesian and gravity roles capture their hold
-  target on activation), records `/joint_states`, the role's `tau_d`,
-  and (for joint) `/target_joint` to an SQLite rosbag for
-  `duration_s` seconds (default 10), and emits a YAML manifest
-  describing role, controller name, robot, duration, bag path,
-  bring-up launch args, recorded topics, per-topic message counts, and
-  a pointer back to the recorder script. The bag payload is gitignored
-  via new `evaluation/baselines/**/*.bag/` +
-  `evaluation/baselines/**/*.mcap/` patterns; only the manifest is
-  committed. `scripts/record_all_crisp_baselines.sh` iterates the 3×2
-  grid serially (one sim at a time) and continues on failure. Ran it
-  clean end-to-end in ~4m36s on a warm machine; produced 6 manifests
-  with 3500–4600 `/joint_states` messages each (sim rate ~350–460 Hz
-  over the 10 s window). No `tau_d` messages because the CRISP
-  controllers do not publish `tau_d` unless introspection is enabled;
-  the manifests list the topic but `bag_contents` only shows topics
-  that actually received messages, matching the bag's own
-  `metadata.yaml`. Full test gate (`scripts/run_tests.sh`) green
-  (8/8, ~4:15) after the change — the recorder is a one-shot tool and
-  is intentionally kept out of `run_tests.sh`. With this the last
-  unchecked M2 item in `docs/ROADMAP.md` is ticked and the milestone
-  is closed.
+- **M3 — ADR-0008: scope the simplified joint impedance controller.**
+  Read through `third_party/crisp_controllers/src/cartesian_controller.{cpp,yaml}`
+  (~750 + ~320 lines) and
+  `bringup/config/crisp_joint_impedance.{ur5e,ur15}.yaml`, then appended
+  **ADR-0008** to `docs/DECISIONS.md`. The ADR enumerates a concrete
+  "keep" list (9 items: pure joint-space PD with per-joint diagonal `K`
+  and `D`, auto-damping when `D[i] < 0`, `position+velocity` state
+  interfaces, `effort` command interface, `~/target_joint` subscriber
+  seeded to the measured `q` on activation, absolute torque saturation,
+  torque rate saturation, `target_joint` validation with URDF-limit
+  clamping on `q_d`, `~/tau_d` diagnostics, and
+  `generate_parameter_library` parameters) and a "drop" list (10 items:
+  Cartesian/OSC task branch, pinocchio-based gravity / Coriolis /
+  nullspace / Jacobian machinery, Franka-tuned 7-vector friction model,
+  EMA filters, soft joint-limit repulsion, per-axis error clip,
+  noise injection, log / introspection flags, `stop_commands`, and
+  `TorqueFeedbackController` / broadcaster plugins). Tests plan is also
+  stated: gtest unit tests on the PD + saturation math with no ROS,
+  plus integration tests parametrised over `{ur5e, ur15}` re-using the
+  same bounded-tracking-error thresholds as
+  `tests/integration/test_crisp_joint_impedance.py` so the M5
+  comparison is a direct swap. Ticked the corresponding ROADMAP bullet
+  under M3. Docs-only change — no code added, no tests modified; full
+  test gate (`scripts/run_tests.sh`) still green.
+- **M2 baseline rosbags + manifests.** See prior STATUS.
 - **Sync `docs/ROADMAP.md` M2 ticks with reality.** See prior STATUS.
 - **De-flake integration `/joint_states` sampling.** See prior STATUS.
 - **Controller 3 (crisp gravity compensation) on ur5e and ur15.** See
   prior STATUS.
 - **Controller 2 (crisp cartesian impedance) on ur5e and ur15.** See
   prior STATUS.
-- **Controller 1 (crisp joint impedance) on ur5e and ur15.** See prior
-  STATUS.
 
 ## Next task (agent should pick this up)
 
-**M3 — our own simplified joint impedance controller.** First M3 item
-on the ROADMAP: "Study the crisp joint impedance implementation we got
-running in M2. Append a `DECISIONS.md` entry enumerating what to keep
-vs drop (gravity comp, nullspace, friction comp, command
-interpolation, etc.)." That is a decision-only task (no code) and is
-the natural entry point — the code pieces (new package skeleton,
-control-law math, integration tests) follow the ADR. The bring-up and
-test shape from `test_crisp_joint_impedance.py` and
-`bringup/launch/crisp_bringup.launch.py` will carry over directly.
+**M3 — create `src/simple_joint_impedance_controller/` package
+skeleton.** Next unchecked ROADMAP item under M3: an `ament_cmake`
+package exporting a `controller_interface::ControllerInterface` plugin
+class. Scaffold only for this iteration: `package.xml` with deps on
+`controller_interface`, `hardware_interface`, `rclcpp_lifecycle`,
+`realtime_tools`, `generate_parameter_library`, `sensor_msgs`, and
+`pluginlib`; a `CMakeLists.txt` wiring pluginlib export + param lib
+codegen; a minimal `simple_joint_impedance_controller.{hpp,cpp}` with
+the `on_init/configure/activate/deactivate/update` skeleton returning
+`OK`; a `src/simple_joint_impedance_controller.yaml` parameter schema
+matching ADR-0008 ("keep" list); the pluginlib XML; and a first gtest
+unit test covering the pure-math helpers that already exist in the
+skeleton (even if just the per-joint `tau = K dq_err - D qdot` + clamp
+helpers). After that iteration, the next steps are per ROADMAP: flesh
+out the control law, integration tests parametrised over
+`{ur5e, ur15}`, and a `simple_jimp_bringup.launch.py` mirroring
+`bringup/launch/crisp_bringup.launch.py`.
 
 ## Build status
 
@@ -113,6 +116,11 @@ None currently blocking. Informational:
 - Dashboard opens at `http://localhost:8000`; rosbridge at
   `ws://localhost:9090`. Both are pkill'd + port-cleared by
   `scripts/kill_sim.sh`.
+- Gravity-comp hook for our simple joint impedance controller is
+  **not** pre-approved — ADR-0008 flags it as the first extension to
+  revisit only if the M3 integration test can't hold against gravity
+  with pure PD on either arm. If that happens, a follow-up ADR is
+  required before adding the hook.
 
 ## Recent commits
 

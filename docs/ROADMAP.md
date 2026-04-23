@@ -112,9 +112,10 @@ crisp joint impedance controller from M2 but stripped of features we don't
 need. It must match crisp's behaviour on a baseline regulation scenario
 within an agreed tolerance (set in M4).
 
-- [ ] Study the crisp joint impedance implementation we got running in M2.
+- [x] Study the crisp joint impedance implementation we got running in M2.
       Append a `DECISIONS.md` entry enumerating what to keep vs drop
       (gravity comp, nullspace, friction comp, command interpolation, etc.).
+      Done as **ADR-0008** in `docs/DECISIONS.md`.
 - [ ] Create package `src/simple_joint_impedance_controller/`
       (`controller_interface::ControllerInterface` plugin, `ament_cmake`).
 - [ ] Control law baseline: `tau = K (q_d - q) - D * qdot`, with torque

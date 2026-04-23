@@ -184,3 +184,138 @@ Format: ADR-lite. Do not delete past entries; supersede with a new one.
   gravity-comp sources fighting for the arm. When M3's own simple joint
   impedance lands, it will follow the same pattern (be the only effort
   commander while active, compute its own gravity comp).
+
+---
+
+## ADR-0008 — Scope of our simplified joint impedance controller (M3)
+
+- **Date:** 2026-04-23
+- **Status:** Accepted
+- **Context:** M3 calls for a lightweight, in-tree controller modelled on
+  the `crisp_controllers/CartesianController` plugin running in its
+  `joint_impedance_controller` role (see `docs/crisp_controllers.md` and
+  the configs under `bringup/config/crisp_joint_impedance.{ur5e,ur15}.yaml`).
+  The upstream class is ~750 lines of C++ plus ~320 lines of parameter
+  schema and pulls in pinocchio, the full Cartesian/OSC task with per-axis
+  error clipping, three flavours of nullspace projector, EMA filters on
+  target/state/output, a 7-DOF friction model, joint-limit repulsion,
+  output torque rate saturation, and noise injection. Most of that
+  machinery is inert in the joint-impedance role we actually run:
+  `task.k_*=0` zeroes the Cartesian branch entirely, and
+  `nullspace.projector_type: none` makes the nullspace PD the whole control
+  law. For M3 we want a minimal controller we fully own and can reason
+  about end-to-end — not a re-implementation of the whole plugin.
+- **Decision:** Implement `src/simple_joint_impedance_controller/` as a
+  `controller_interface::ControllerInterface` plugin with the following
+  feature split relative to crisp's joint-impedance configuration.
+
+  ### Keep (baseline must-haves)
+
+  1. **Pure joint-space PD control law:**
+     `tau_cmd = K (q_d - q) - D qdot`, computed per joint with diagonal
+     `K` and `D`. Corresponds to crisp's nullspace term when
+     `projector_type: none`, `task.k_*=0`. Sole commander on
+     `<joint>/effort`.
+  2. **State interfaces:** `<joint>/{position, velocity}` only
+     (match crisp's joint-impedance role).
+  3. **Per-joint gains:** `K` and `D` are `double_array` parameters the
+     length of `joints`; negative `D[i]` auto-fills `2*sqrt(K[i])`
+     (same convention as crisp's `nullspace.damping: -1.0`).
+  4. **Target topic:** subscribe to `~/target_joint`
+     (`sensor_msgs/JointState`); use its `position` field as `q_d` and,
+     when populated and the right length, its `velocity` field as
+     `qdot_d` (defaults to zero). On activation, seed `q_d` to the
+     measured `q` so we hold position — this is what crisp does in its
+     joint role (see `tests/integration/test_crisp_joint_impedance.py`).
+  5. **Torque saturation (absolute):** per-joint `tau_max` clamp applied
+     last. Maps to crisp's `limit_torques` + `nullspace.max_tau`.
+     Safety-critical → mandatory.
+  6. **Torque rate saturation:** per-joint `max_delta_tau` clamp between
+     successive control cycles. Maps to crisp's `max_delta_tau` /
+     `saturateTorqueRate`. Prevents effort-interface step jumps that the
+     MuJoCo sim and real UR drivers both dislike. Safety-adjacent →
+     mandatory.
+  7. **Target validation:** reject `target_joint` messages whose joint
+     names (when non-empty) don't match `joints` or whose position array
+     length is wrong; clamp each `q_d[i]` to the URDF joint limits so a
+     bad command can't drive the arm into a hard stop. Simpler, stricter
+     analogue of crisp's `limit_error` + `joint_limit_repulsion`
+     combination (see drop-list below).
+  8. **Parameter handling:** `generate_parameter_library` for everything
+     above (AGENTS.md §4).
+  9. **Diagnostics:** publish commanded torque on `~/tau_d`
+     (`sensor_msgs/JointState`, same topic shape as crisp) so existing
+     test/eval tooling transfers one-to-one.
+
+  ### Drop (explicitly not in M3 scope)
+
+  1. **Cartesian / OSC task branch** (`task.k_*`, `task.d_*`,
+     `task.error_clip`, `use_operational_space`,
+     `operational_space_regularization`) — whole Cartesian side of the
+     plugin. Our controller is joint-space only; anyone needing
+     Cartesian uses crisp or the M4 cartesian_controllers.
+  2. **Pinocchio dependency** and all model-based terms:
+     - **Gravity compensation.** Drop for M3 baseline. UR's effort
+       interface in `ur_simulator` MuJoCo mode is backed by the sim's
+       own `gravity_compensation.py` node (ADR-0007); our controller
+       will be the sole effort commander while active, so gravity must
+       be re-added later **if the integration test fails without it**.
+       Treat this as a follow-up per ROADMAP M3 line ("Optional gravity-
+       comp hook only if M2 showed it is needed to match crisp") — we
+       will first try pure PD with gains tuned high enough to hold
+       against gravity within the same bounded-error thresholds used in
+       `tests/integration/test_crisp_joint_impedance.py`; if that fails
+       we add a minimal KDL- or urdf-based gravity hook in a follow-up
+       commit and supersede this bullet with a new ADR.
+     - **Coriolis compensation.** Drop. At UR5e/UR15 quasi-static
+       regulation speeds the Coriolis torque is negligible.
+     - **Nullspace projector machinery** (`kinematic`, `dynamic`,
+       `weights`, `regularization`, Jacobian pseudo-inverse). Not
+       meaningful without a Cartesian task.
+     - **Local vs world Jacobian** (`use_local_jacobian`). Ditto.
+  3. **Friction model** (`use_friction`, `friction.fp1/fp2/fp3`). The
+     upstream defaults are Franka-calibrated 7-vectors; they are the
+     wrong length for a 6-DOF UR and would need re-identification.
+     Drop for M3.
+  4. **EMA filters** on target pose, `q`, `dq`, `q_ref`, and output
+     torque (`filter.*`). The sim + real UR publish at ≥125 Hz with
+     clean signals; an extra first-order filter adds phase lag and
+     another tuning knob with no measurable win at M3's regulation
+     scenarios. Drop.
+  5. **Joint-limit repulsion** (`joint_limit_repulsion.*`). Replaced
+     with the simpler, deterministic approach of clamping `q_d` into
+     the URDF limits (see keep-list #7). Avoids the tuning surface of
+     a soft repulsive torque field at M3 gains.
+  6. **Per-axis error clip** (`task.error_clip.*`). Not applicable
+     without a Cartesian task.
+  7. **Noise injection** (`noise.*`). Debug/stability test tool, not
+     needed for production control.
+  8. **Logging and introspection flags** (`log.*`, `enable_introspection`).
+     Out of scope for M3. Rely on `~/tau_d` + standard `/rosout` logging.
+  9. **`stop_commands`** safety flag. Redundant with `ros2_control`'s
+     own `deactivate` / `switch_controllers` mechanism (ADR-0007).
+  10. **`TorqueFeedbackController` / broadcaster plugins.** Separate
+      classes in crisp; unrelated to M3.
+
+  ### Consequences
+
+  - Implementation budget is ≈200 lines of C++ + a small yaml param
+    schema (vs ~750 + ~320 for the crisp plugin). No pinocchio /
+    Eigen-heavy math dependencies beyond what `ros2_control` already
+    pulls in.
+  - The controller is launch-compatible with the crisp bring-up pattern:
+    one `simple_jimp_bringup.launch.py` mirroring
+    `bringup/launch/crisp_bringup.launch.py` so the M5 comparison
+    harness can flip between controllers with a single flag (ROADMAP
+    M3 last item).
+  - Tests plan: (a) gtest unit tests on the PD + torque/rate saturation
+    math with no ROS, (b) integration tests parametrised over
+    `{ur5e, ur15}` with the same bounded-tracking-error thresholds as
+    `tests/integration/test_crisp_joint_impedance.py` so a direct
+    comparison in M5 is trivial.
+  - If the integration test fails on either arm purely because of
+    sagging under gravity, the gravity-comp hook listed under
+    "Drop #2" becomes a follow-up item with its own ADR; this ADR
+    does **not** pre-approve that change, only flags it as the first
+    extension to consider.
+
