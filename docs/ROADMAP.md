@@ -73,20 +73,29 @@ launches.
       document any missing-dep fixes in STATUS.md. (Built clean with
       `--packages-skip cartesian_controller_simulation
       cartesian_controller_tests`; see ADR-0005.)
-- [ ] Enumerate the three impedance controllers shipped by crisp; record
+- [x] Enumerate the three impedance controllers shipped by crisp; record
       their plugin names, command interfaces, and required params in
-      `docs/crisp_controllers.md` (new, short reference file).
+      `docs/crisp_controllers.md` (new, short reference file). Verified
+      against `third_party/crisp_controllers/crisp_controllers.xml` (four
+      plugin classes) and the three configuration roles of
+      `CartesianController`.
 - [x] Controller 1 (crisp joint impedance): write
       `bringup/config/crisp_joint_impedance.{ur5e,ur15}.yaml`, wire it into
       `bringup/launch/crisp_bringup.launch.py`, bring it up on ur5e.
 - [x] Same controller, bring it up on ur15.
-- [ ] Controller 2 (second crisp impedance variant): same two-step rollout
-      (ur5e, then ur15).
-- [ ] Controller 3 (third crisp impedance variant): same two-step rollout.
-- [ ] Integration tests under `tests/integration/test_crisp_*.py`: for each
+- [x] Controller 2 (second crisp impedance variant): same two-step rollout
+      (ur5e, then ur15). Done as `cartesian_impedance_controller` role;
+      configs `bringup/config/crisp_cartesian_impedance.{ur5e,ur15}.yaml`,
+      test `tests/integration/test_crisp_cartesian_impedance.py`.
+- [x] Controller 3 (third crisp impedance variant): same two-step rollout.
+      Done as `gravity_compensation` role; configs
+      `bringup/config/crisp_gravity_compensation.{ur5e,ur15}.yaml`, test
+      `tests/integration/test_crisp_gravity_compensation.py`.
+- [x] Integration tests under `tests/integration/test_crisp_*.py`: for each
       of the three controllers and each of `{ur5e, ur15}`, send a small
       regulation command and assert bounded tracking error within a fixed
-      time window.
+      time window. Three test files, each parametrised over
+      `{ur5e, ur15}`, all green in `scripts/run_tests.sh` (~3:20).
 - [ ] Record baseline rosbags under `evaluation/baselines/crisp/`
       (gitignored payload; commit a manifest `.yaml` of what was recorded).
 

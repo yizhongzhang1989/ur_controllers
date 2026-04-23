@@ -1,26 +1,49 @@
 # Status
 
-_Last updated: 2026-04-23 (M2: integration `/joint_states` sampling
-de-flaked via persistent rclpy subscription)._
+_Last updated: 2026-04-23 (M2: roadmap ticks synced to reality — all
+three crisp roles and the integration-tests umbrella are now `[x]`; only
+the baseline rosbag manifest remains)._
 
 ## Current milestone
 
-**M2 — `crisp_controllers` in sim**, in progress. M1 is complete. All three
-configuration roles of `crisp_controllers/CartesianController`
+**M2 — `crisp_controllers` in sim**, nearly complete. M1 is complete. All
+three configuration roles of `crisp_controllers/CartesianController`
 (`joint_impedance_controller`, `cartesian_impedance_controller`,
-`gravity_compensation`) are now brought up end-to-end on `ur5e` and `ur15`
+`gravity_compensation`) are brought up end-to-end on `ur5e` and `ur15`
 via `bringup/launch/crisp_bringup.launch.py`
 (`mode:={joint,cartesian,gravity}`) with per-arm YAML under
 `bringup/config/`. Integration tests (`tests/integration/test_crisp_*.py`)
-assert bounded joint-space drift on both arms for each role. Next: refresh
-the `docs/crisp_controllers.md` enumeration tick, then the broader
-integration-test umbrella check and the baseline rosbag manifest to close
-out M2. Priority order after M2: M3 (our own joint impedance), M4
-(cartesian controllers), M5 (evaluation harness). Every sim task must pass
-on both `ur5e` and `ur15`. Real UR15 is explicitly out of scope.
+assert bounded joint-space drift on both arms for each role. The
+enumeration doc (`docs/crisp_controllers.md`) was verified against the
+plugin manifest. The only remaining M2 item is the baseline rosbag
+manifest under `evaluation/baselines/crisp/`. Priority order after M2:
+M3 (our own joint impedance), M4 (cartesian controllers), M5 (evaluation
+harness). Every sim task must pass on both `ur5e` and `ur15`. Real UR15
+is explicitly out of scope.
 
 ## Last completed tasks
 
+- **Sync `docs/ROADMAP.md` M2 ticks with reality.** Four items flipped
+  `[ ]`→`[x]` against existing artifacts:
+  - Enumeration of the three impedance controllers in
+    `docs/crisp_controllers.md` — verified against
+    `third_party/crisp_controllers/crisp_controllers.xml` (four plugin
+    classes: `CartesianController`, `TorqueFeedbackController`,
+    `PoseBroadcaster`, `TwistBroadcaster`) and the three
+    `CartesianController` configuration roles.
+  - Controller 2 rollout (`cartesian_impedance_controller` role) on
+    ur5e + ur15 — configs
+    `bringup/config/crisp_cartesian_impedance.{ur5e,ur15}.yaml`, test
+    `tests/integration/test_crisp_cartesian_impedance.py`.
+  - Controller 3 rollout (`gravity_compensation` role) on ur5e + ur15 —
+    configs `bringup/config/crisp_gravity_compensation.{ur5e,ur15}.yaml`,
+    test `tests/integration/test_crisp_gravity_compensation.py`.
+  - Integration-tests umbrella — three `test_crisp_*.py` files each
+    parametrised over `{ur5e, ur15}`, all green in `scripts/run_tests.sh`.
+  No code change; documentation-only. Test gate: 8/8 green in ~3:17
+  (one earlier sim-bringup flake on `ur15` — `forward_effort_controller`
+  did not come active within the 90 s window on a cold run; re-ran clean,
+  consistent with ADR-0006's known RMW-race envelope).
 - **De-flake integration `/joint_states` sampling.** The regulation-window
   loops in `tests/integration/test_crisp_{joint,cartesian,gravity}*.py`
   used to spawn one `ros2 topic echo --once /joint_states` per sample.
@@ -33,40 +56,12 @@ on both `ur5e` and `ur15`. Real UR15 is explicitly out of scope.
   (`< 0.15 rad`) and the `samples >= 3` stall guard are unchanged — the
   fix removes an instrumentation artefact, not a real assertion. Full
   suite is green (8/8, ~3:40).
-- **Controller 3 (crisp gravity compensation) on ur5e and ur15.**
-  - `bringup/config/crisp_gravity_compensation.{ur5e,ur15}.yaml`: per-arm
-    param files for the `gravity_compensation` role of
-    `crisp_controllers/CartesianController` — all `task.k_*` = 0,
-    `nullspace.stiffness = 0` with `projector_type: none`, so the
-    controller is a pure pinocchio gravity + Coriolis feed-forward
-    passthrough. `use_gravity_compensation: true`,
-    `use_coriolis_compensation: true`. Joint list matches the sim's
-    unprefixed UR set.
-  - `bringup/launch/crisp_bringup.launch.py`: extended `mode` choices to
-    `{joint, cartesian, gravity}` and added the `gravity_compensation`
-    entry to `_ROLE_YAML_STEM`. No structural changes — the existing
-    spawner `--inactive` + strict `switch_controllers` pattern covers
-    this role.
-  - `tests/integration/test_crisp_gravity_compensation.py`: parametrised
-    over `{ur5e, ur15}`. Brings up sim + crisp, asserts the swap landed
-    (`gravity_compensation` active, `forward_effort_controller`
-    inactive), then samples `/joint_states` over 5 s and asserts max
-    per-joint drift < 0.15 rad — verifying the pinocchio gravity term
-    is actually holding the arm up (zero-torque would cause the arm to
-    fall, failing the tolerance).
-  - `scripts/run_tests.sh` now runs 8 integration tests (sim smoke × 2
-    arms + crisp joint × 2 arms + crisp cartesian × 2 arms + crisp
-    gravity × 2 arms) in ~3:20, all green.
-- **Controller 2 (crisp cartesian impedance) on ur5e and ur15.**
-  See previous STATUS for details: `cartesian_impedance_controller`
-  role with `k_pos_* = 400`, `k_rot_* = 30`, nullspace behind a
-  kinematic Cartesian projector; `test_crisp_cartesian_impedance.py`
-  asserts hold-pose drift < 0.15 rad on both arms.
-- **Controller 1 (crisp joint impedance) on ur5e and ur15.**
-  See previous STATUS for details: `joint_impedance_controller` role
-  with nullspace PD (`projector_type: none`, stiffness 50);
-  `test_crisp_joint_impedance.py` publishes `/target_joint` at current
-  q and asserts drift < 0.15 rad on both arms.
+- **Controller 3 (crisp gravity compensation) on ur5e and ur15.** See
+  prior STATUS for details.
+- **Controller 2 (crisp cartesian impedance) on ur5e and ur15.** See
+  prior STATUS for details.
+- **Controller 1 (crisp joint impedance) on ur5e and ur15.** See prior
+  STATUS for details.
 - `ur_sim_mujoco.launch.py` (submodule `third_party/ur_simulator`,
   `auto_dev` branch): serialise controller spawners. See ADR-0006.
 - `docs/crisp_controllers.md` added: enumerates the plugin classes
@@ -92,24 +87,13 @@ on both `ur5e` and `ur15`. Real UR15 is explicitly out of scope.
 
 ## Next task (agent should pick this up)
 
-All three crisp roles are green. Remaining M2 items (in `docs/ROADMAP.md`):
-
-1. **Enumeration doc refresh + tick.** `docs/crisp_controllers.md` already
-   describes the three roles; verify it matches what actually ships and
-   tick the first unchecked item of M2 in `docs/ROADMAP.md`.
-2. **Integration-test umbrella check.** M2's "Integration tests under
-   `tests/integration/test_crisp_*.py`" item is satisfied in practice
-   (three test files, each parametrised over `{ur5e, ur15}`, all green).
-   Tick the item in `docs/ROADMAP.md`.
-3. **Baseline rosbag manifest.** Record a short regulation scenario per
-   role × arm, commit `evaluation/baselines/crisp/<role>.<arm>.manifest.yaml`
-   listing topics / duration / sim seed (bag payload gitignored per the
-   existing rule in `docs/ROADMAP.md`).
-
-Any one of these closes out another M2 task. After M2 is fully done, M3
-(our own simplified joint impedance controller) is next — the bring-up
-pattern and test shape from `test_crisp_joint_impedance.py` will carry
-over directly.
+Only one M2 item remains: **baseline rosbag manifest.** Record a short
+regulation scenario per role × arm, commit
+`evaluation/baselines/crisp/<role>.<arm>.manifest.yaml` listing topics /
+duration / sim seed (bag payload gitignored per the existing rule in
+`docs/ROADMAP.md`). After that, M2 is closed and M3 (our own simplified
+joint impedance controller) is next — the bring-up pattern and test
+shape from `test_crisp_joint_impedance.py` will carry over directly.
 
 ## Build status
 
