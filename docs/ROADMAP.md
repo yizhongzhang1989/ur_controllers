@@ -53,7 +53,13 @@ Cross-cutting rules:
       `scripts/run_tests.sh --unit-only`. Integration tests stay out
       of CI until a sim-in-CI story lands. Pinned by 12 unit tests in
       `tests/unit/test_ci_workflow.py`.
-- [ ] Write `scripts/setup_env.sh` to install ROS deps via `rosdep`.
+- [x] Write `scripts/setup_env.sh` to install ROS deps via `rosdep`.
+      Idempotent three-stage wrapper: `apt-get install` of the README
+      "Prerequisites" list + build/test tooling, `rosdep install` with
+      the ADR-0005 `--skip-keys`, and `pip install --user pre-commit
+      ruff` + `pre-commit install` for the local git hook. Flags:
+      `--dry-run` (mirrors `scripts/run_tests.sh`), `--no-pre-commit`.
+      Pinned by 26 unit tests in `tests/unit/test_setup_env.py`.
 
 ## M1 — Simulator brings up UR5e and UR15
 
