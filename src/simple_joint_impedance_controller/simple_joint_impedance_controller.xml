@@ -1,0 +1,11 @@
+<library path="simple_joint_impedance_controller">
+    <class name="simple_joint_impedance_controller/SimpleJointImpedanceController"
+           type="simple_joint_impedance_controller::SimpleJointImpedanceController"
+           base_class_type="controller_interface::ControllerInterface">
+        <description>
+            Lightweight joint-space PD impedance controller: tau = K (q_d - q) - D qdot,
+            with per-joint torque and torque-rate saturation and URDF-limit clamping on
+            the target. See docs/DECISIONS.md ADR-0008 for the feature-split rationale.
+        </description>
+    </class>
+</library>

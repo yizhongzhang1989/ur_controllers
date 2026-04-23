@@ -116,7 +116,7 @@ within an agreed tolerance (set in M4).
       Append a `DECISIONS.md` entry enumerating what to keep vs drop
       (gravity comp, nullspace, friction comp, command interpolation, etc.).
       Done as **ADR-0008** in `docs/DECISIONS.md`.
-- [ ] Create package `src/simple_joint_impedance_controller/`
+- [x] Create package `src/simple_joint_impedance_controller/`
       (`controller_interface::ControllerInterface` plugin, `ament_cmake`).
 - [ ] Control law baseline: `tau = K (q_d - q) - D * qdot`, with torque
       saturation and safe defaults. Optional gravity-comp hook only if M2

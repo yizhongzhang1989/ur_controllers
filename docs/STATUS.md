@@ -1,111 +1,103 @@
 # Status
 
-_Last updated: 2026-04-23 (M3 kicked off: ADR-0008 scopes the simplified
-joint impedance controller — keep vs drop split for what we take from
-crisp's joint-impedance role. Next: create
-`src/simple_joint_impedance_controller/` package skeleton)._
+_Last updated: 2026-04-23 (M3: created `src/simple_joint_impedance_controller/`
+package skeleton — pluginlib-loadable `ControllerInterface` plugin with
+`generate_parameter_library` schema (ADR-0008 keep-list), header-only
+math helpers (`math.hpp`), and 14 gtest unit tests on the PD + saturation
++ clamp math. Also fixed `scripts/run_tests.sh` stage 2 to pass
+`--packages-skip cartesian_controller_simulation cartesian_controller_tests`,
+matching ADR-0005. Next: flesh out `update()` control-law wiring.)_
 
 ## Current milestone
 
 **M3 — our own simplified joint impedance controller: IN PROGRESS.**
-M0–M2 are done. The first M3 item ("Study crisp joint impedance and
-record keep-vs-drop in DECISIONS.md") is now ticked in
-`docs/ROADMAP.md`; the choice is captured as **ADR-0008** in
-`docs/DECISIONS.md`. Summary of the ADR: keep a minimal joint-space
-PD (`tau = K (q_d - q) - D qdot`) with per-joint gains, torque and
-torque-rate saturation, `target_joint` subscription seeded to the
-measured `q` on activation, URDF-limit clamping on `q_d`, a `~/tau_d`
-diagnostics publisher, and parameters via
-`generate_parameter_library`; drop the Cartesian/OSC branch, pinocchio
-and all model-based terms (gravity, Coriolis, nullspace projectors,
-Jacobian), Franka-tuned friction model, EMA filters, soft
-joint-limit-repulsion, per-axis error clipping, noise injection,
-logging / introspection knobs, and the `stop_commands` flag. Gravity
-compensation is explicitly flagged as the first extension to consider
-if the integration test can't hold against gravity on either arm; if
-so, it lands as a follow-up ADR, not silently. Priority order remains:
-M3 → M4 (cartesian controllers) → M5 (evaluation harness). M-REAL
-stays out of scope.
+M0–M2 done; ADR-0008 fixes the scope. This iteration adds the package
+skeleton: `src/simple_joint_impedance_controller/` with `package.xml`,
+`CMakeLists.txt` (pluginlib export + `generate_parameter_library`
+codegen), `include/simple_joint_impedance_controller/{math.hpp,
+simple_joint_impedance_controller.hpp}`, `src/simple_joint_impedance_controller.cpp`
+(no-op `update()` returning `OK`), `src/simple_joint_impedance_controller.yaml`
+(ADR-0008 keep-list params: `joints`, `k`, `d`, `tau_max`,
+`max_delta_tau`, `command_topic`, `diagnostics_topic`),
+`simple_joint_impedance_controller.xml` pluginlib manifest, and
+`tests/test_math.cpp` with 14 gtest cases covering
+`auto_fill_critical_damping`, `clamp_to_limits`, `compute_pd_torque`,
+`saturate_torque_rate`, and `saturate_torque_abs` — each tested for
+happy-path correctness, length/bound validation, and rejection on
+invalid inputs. Priority order unchanged: M3 → M4 → M5; M-REAL out of
+scope.
 
 ## Last completed tasks
 
-- **M3 — ADR-0008: scope the simplified joint impedance controller.**
-  Read through `third_party/crisp_controllers/src/cartesian_controller.{cpp,yaml}`
-  (~750 + ~320 lines) and
-  `bringup/config/crisp_joint_impedance.{ur5e,ur15}.yaml`, then appended
-  **ADR-0008** to `docs/DECISIONS.md`. The ADR enumerates a concrete
-  "keep" list (9 items: pure joint-space PD with per-joint diagonal `K`
-  and `D`, auto-damping when `D[i] < 0`, `position+velocity` state
-  interfaces, `effort` command interface, `~/target_joint` subscriber
-  seeded to the measured `q` on activation, absolute torque saturation,
-  torque rate saturation, `target_joint` validation with URDF-limit
-  clamping on `q_d`, `~/tau_d` diagnostics, and
-  `generate_parameter_library` parameters) and a "drop" list (10 items:
-  Cartesian/OSC task branch, pinocchio-based gravity / Coriolis /
-  nullspace / Jacobian machinery, Franka-tuned 7-vector friction model,
-  EMA filters, soft joint-limit repulsion, per-axis error clip,
-  noise injection, log / introspection flags, `stop_commands`, and
-  `TorqueFeedbackController` / broadcaster plugins). Tests plan is also
-  stated: gtest unit tests on the PD + saturation math with no ROS,
-  plus integration tests parametrised over `{ur5e, ur15}` re-using the
-  same bounded-tracking-error thresholds as
-  `tests/integration/test_crisp_joint_impedance.py` so the M5
-  comparison is a direct swap. Ticked the corresponding ROADMAP bullet
-  under M3. Docs-only change — no code added, no tests modified; full
-  test gate (`scripts/run_tests.sh`) still green.
+- **M3 — `simple_joint_impedance_controller` package skeleton.** Ninth
+  package in the workspace; builds cleanly via the standard
+  `colcon build --packages-skip cartesian_controller_simulation
+  cartesian_controller_tests` invocation. `test_math` runs in <0.1 s
+  with 14 passing assertions. Also switched
+  `scripts/run_tests.sh` stage 2 to pass `--packages-skip` (previously
+  stale `build/cartesian_controller_{simulation,tests}` dirs caused
+  `colcon test` to fail once the new package introduced a testable
+  target). Full `scripts/run_tests.sh` now exits 0 in ~4:10 (14 gtest
+  + 5 crisp_controllers unit tests + 8 integration tests).
+- **M3 — ADR-0008: scope the simplified joint impedance controller.** See
+  prior STATUS.
 - **M2 baseline rosbags + manifests.** See prior STATUS.
 - **Sync `docs/ROADMAP.md` M2 ticks with reality.** See prior STATUS.
 - **De-flake integration `/joint_states` sampling.** See prior STATUS.
-- **Controller 3 (crisp gravity compensation) on ur5e and ur15.** See
-  prior STATUS.
-- **Controller 2 (crisp cartesian impedance) on ur5e and ur15.** See
-  prior STATUS.
 
 ## Next task (agent should pick this up)
 
-**M3 — create `src/simple_joint_impedance_controller/` package
-skeleton.** Next unchecked ROADMAP item under M3: an `ament_cmake`
-package exporting a `controller_interface::ControllerInterface` plugin
-class. Scaffold only for this iteration: `package.xml` with deps on
-`controller_interface`, `hardware_interface`, `rclcpp_lifecycle`,
-`realtime_tools`, `generate_parameter_library`, `sensor_msgs`, and
-`pluginlib`; a `CMakeLists.txt` wiring pluginlib export + param lib
-codegen; a minimal `simple_joint_impedance_controller.{hpp,cpp}` with
-the `on_init/configure/activate/deactivate/update` skeleton returning
-`OK`; a `src/simple_joint_impedance_controller.yaml` parameter schema
-matching ADR-0008 ("keep" list); the pluginlib XML; and a first gtest
-unit test covering the pure-math helpers that already exist in the
-skeleton (even if just the per-joint `tau = K dq_err - D qdot` + clamp
-helpers). After that iteration, the next steps are per ROADMAP: flesh
-out the control law, integration tests parametrised over
-`{ur5e, ur15}`, and a `simple_jimp_bringup.launch.py` mirroring
-`bringup/launch/crisp_bringup.launch.py`.
+**M3 — flesh out the control law in `update()`.** Next unchecked ROADMAP
+item under M3 ("Control law baseline: `tau = K (q_d - q) - D * qdot`,
+with torque saturation and safe defaults"). The skeleton in
+`src/simple_joint_impedance_controller/src/simple_joint_impedance_controller.cpp`
+currently returns `OK` without touching command interfaces. Wire up:
+(a) in `on_activate`, seed `q_d` to the currently measured `q` (sole
+effort commander while active — mirrors ADR-0007 for crisp and what the
+integration test will assume); (b) in `update`, read the
+`position`/`velocity` state interfaces in the order defined by
+`state_interface_configuration()`, apply
+`compute_pd_torque` + `saturate_torque_rate` + `saturate_torque_abs`
+from `math.hpp`, and write the result to the `<joint>/effort` command
+interfaces; (c) subscribe to `params_.command_topic` as
+`sensor_msgs/JointState`, copy the `position` field (after length/name
+validation + `clamp_to_limits` against URDF limits) into `q_d`; (d)
+publish `tau_d` on `params_.diagnostics_topic` each cycle. Auto-fill
+critical damping (`auto_fill_critical_damping`) once at `on_activate`.
+After the control law compiles and exists, the next steps per ROADMAP
+are: integration tests `tests/integration/test_simple_jimp_*.py`
+parametrised over `{ur5e, ur15}` mirroring
+`tests/integration/test_crisp_joint_impedance.py`, and a
+`bringup/launch/simple_jimp_bringup.launch.py` mirroring
+`bringup/launch/crisp_bringup.launch.py` so the M5 comparison is a
+single flag.
 
 ## Build status
 
 - ROS 2 distro: **Humble** (Ubuntu 22.04, matches system install).
 - `colcon build --symlink-install --base-paths src third_party
   --packages-skip cartesian_controller_simulation cartesian_controller_tests`
-  produces 9 packages successfully:
+  now produces **10** packages successfully:
   - 6 from `cartesian_controllers`
   - `crisp_controllers`
   - `ur_sim_config`
   - `ur_simulation_gz`
-- Skipped: `cartesian_controller_simulation` (needs MuJoCo C lib at
-  `/home/robot/mujoco-3.0.0`, not installed; we use `ur_simulator`
-  instead), `cartesian_controller_tests` (ROS 1 catkin package).
+  - `simple_joint_impedance_controller` (new)
+- Skipped: `cartesian_controller_simulation`, `cartesian_controller_tests`
+  (ADR-0005). `scripts/run_tests.sh` stage 2 now skips the same pair.
 
 ## Test status
 
 - `scripts/run_tests.sh` runs unit → colcon test → integration.
+- Stage 2 colcon test now `--packages-skip` cartesian_controller_simulation
+  + cartesian_controller_tests (stale build dirs that never build).
 - Integration stage sources `/opt/ros/humble/setup.bash` and
   `install/setup.bash` before pytest.
-- Full integration suite: 8 tests (sim smoke + 3 crisp roles, each
-  ×{ur5e, ur15}) — all green in ~4:15.
+- Test counts: 14 new `test_math` gtests (simple_joint_impedance_controller)
+  + existing crisp_controllers gtests + 8 integration tests
+  (sim smoke + 3 crisp roles, each ×{ur5e, ur15}). All green in ~4:10.
 - `scripts/record_crisp_baseline.sh` is a one-shot baseline recorder,
-  NOT part of `run_tests.sh`. Re-run it manually when baselines need
-  refreshing (e.g. after a gain retune or a controller change); it
-  rewrites the matching manifest in place.
+  NOT part of `run_tests.sh`.
 
 ## Blockers / open questions for operator
 
