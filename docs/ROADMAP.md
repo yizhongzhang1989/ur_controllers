@@ -96,8 +96,12 @@ launches.
       regulation command and assert bounded tracking error within a fixed
       time window. Three test files, each parametrised over
       `{ur5e, ur15}`, all green in `scripts/run_tests.sh` (~3:20).
-- [ ] Record baseline rosbags under `evaluation/baselines/crisp/`
+- [x] Record baseline rosbags under `evaluation/baselines/crisp/`
       (gitignored payload; commit a manifest `.yaml` of what was recorded).
+      Done via `scripts/record_crisp_baseline.sh <role> <robot>` +
+      `scripts/record_all_crisp_baselines.sh`; 6 manifests committed
+      (`evaluation/baselines/crisp/<role>_<robot>.manifest.yaml`), bag
+      payloads under `*.bag/` gitignored.
 
 ---
 

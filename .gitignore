@@ -23,6 +23,8 @@ COLCON_IGNORE
 # Evaluation outputs (keep scenario specs, drop large outputs)
 evaluation/baselines/*.bag
 evaluation/baselines/*.mcap
+evaluation/baselines/**/*.bag/
+evaluation/baselines/**/*.mcap/
 evaluation/reports/
 
 # Agent loop control
