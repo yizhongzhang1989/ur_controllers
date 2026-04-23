@@ -172,6 +172,46 @@ def _joint_state_positions() -> dict[str, float] | None:
     return dict(zip(names, positions))
 
 
+def _collect_joint_state_samples(duration_s: float) -> list[dict[str, float]]:
+    """Subscribe to ``/joint_states`` via rclpy for ``duration_s`` seconds
+    and return one ``{name: position}`` dict per received message.
+
+    A single persistent subscription is used instead of one
+    ``ros2 topic echo --once`` process per sample: the per-echo
+    node-startup/discovery cost (~0.5–2 s) makes a tight
+    ``samples >= N`` assertion flaky even when the controller is
+    publishing ``/joint_states`` at full rate.
+    """
+    import rclpy  # lazy import: ROS env is only guaranteed at test time
+    from sensor_msgs.msg import JointState
+
+    own_context = not rclpy.ok()
+    if own_context:
+        rclpy.init()
+    node = rclpy.create_node("_integration_jstate_sampler")
+    samples: list[dict[str, float]] = []
+
+    def _cb(msg) -> None:  # sensor_msgs/JointState
+        if msg.name and len(msg.name) == len(msg.position):
+            samples.append(
+                {n: float(p) for n, p in zip(msg.name, msg.position)}
+            )
+
+    node.create_subscription(JointState, "/joint_states", _cb, 10)
+    try:
+        deadline = time.monotonic() + duration_s
+        while time.monotonic() < deadline:
+            rclpy.spin_once(node, timeout_sec=0.05)
+    finally:
+        node.destroy_node()
+        if own_context:
+            try:
+                rclpy.shutdown()
+            except Exception:  # noqa: BLE001
+                pass
+    return samples
+
+
 def _wait_until(predicate, timeout_s: float, interval: float = 1.0) -> bool:
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
@@ -298,20 +338,18 @@ def test_crisp_cartesian_impedance_hold_pose(crisp_cartesian_up):
     # Give the controller a moment to settle after the swap transient.
     time.sleep(1.5)
 
-    # 3. Sample for REGULATION_WINDOW_S, assert bounded drift.
-    deadline = time.monotonic() + REGULATION_WINDOW_S
+    # 3. Sample for REGULATION_WINDOW_S via a persistent rclpy
+    #    subscription (see _collect_joint_state_samples) and assert
+    #    bounded drift.
+    observed = _collect_joint_state_samples(REGULATION_WINDOW_S)
+    samples = len(observed)
     worst = 0.0
-    samples = 0
-    while time.monotonic() < deadline:
-        q = _joint_state_positions()
-        if q is None:
-            continue
-        samples += 1
+    for q in observed:
         for j in EXPECTED_JOINTS:
-            err = abs(q[j] - q0[j])
-            if err > worst:
-                worst = err
-        time.sleep(0.25)
+            if j in q:
+                err = abs(q[j] - q0[j])
+                if err > worst:
+                    worst = err
 
     assert samples >= 3, (
         f"Only {samples} /joint_states samples in {REGULATION_WINDOW_S}s "

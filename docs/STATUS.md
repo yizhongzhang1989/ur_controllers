@@ -1,6 +1,7 @@
 # Status
 
-_Last updated: 2026-04-23 (M2: crisp gravity_compensation role brought up on ur5e and ur15)._
+_Last updated: 2026-04-23 (M2: integration `/joint_states` sampling
+de-flaked via persistent rclpy subscription)._
 
 ## Current milestone
 
@@ -20,6 +21,18 @@ on both `ur5e` and `ur15`. Real UR15 is explicitly out of scope.
 
 ## Last completed tasks
 
+- **De-flake integration `/joint_states` sampling.** The regulation-window
+  loops in `tests/integration/test_crisp_{joint,cartesian,gravity}*.py`
+  used to spawn one `ros2 topic echo --once /joint_states` per sample.
+  The ~0.5–2 s node-startup/discovery cost per echo meant the 5 s window
+  occasionally collected only 2 samples, tripping the `samples >= 3`
+  stall guard (observed once on `ur5e` cartesian). Replaced the per-sample
+  subprocess with a single persistent rclpy subscription
+  (`_collect_joint_state_samples(duration_s)`) that spins for the full
+  window and returns all received messages. The drift tolerance
+  (`< 0.15 rad`) and the `samples >= 3` stall guard are unchanged — the
+  fix removes an instrumentation artefact, not a real assertion. Full
+  suite is green (8/8, ~3:40).
 - **Controller 3 (crisp gravity compensation) on ur5e and ur15.**
   - `bringup/config/crisp_gravity_compensation.{ur5e,ur15}.yaml`: per-arm
     param files for the `gravity_compensation` role of
