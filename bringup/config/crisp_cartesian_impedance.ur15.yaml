@@ -1,0 +1,57 @@
+# crisp cartesian impedance (role) — UR15 in MuJoCo sim.
+#
+# See crisp_cartesian_impedance.ur5e.yaml for the role rationale and the
+# relationship to the sim's forward_effort_controller. UR15 shares the
+# UR kinematic naming convention (no per-arm joint prefix in sim), so
+# the joint list is identical. Gains can be retuned per arm later if a
+# tracking test shows UR15 needs stiffer/softer response; for the M2
+# first-light bring-up we use the same values as ur5e.
+
+cartesian_impedance_controller:
+  ros__parameters:
+    joints:
+      - shoulder_pan_joint
+      - shoulder_lift_joint
+      - elbow_joint
+      - wrist_1_joint
+      - wrist_2_joint
+      - wrist_3_joint
+
+    end_effector_frame: tool0
+    base_frame: base
+
+    task:
+      k_pos_x: 400.0
+      k_pos_y: 400.0
+      k_pos_z: 400.0
+      k_rot_x: 30.0
+      k_rot_y: 30.0
+      k_rot_z: 30.0
+
+    nullspace:
+      stiffness: 10.0
+      damping: -1.0
+      projector_type: kinematic
+      max_tau: 20.0
+      regularization: 1.0e-06
+      weights:
+        shoulder_pan_joint:  1.0
+        shoulder_lift_joint: 1.0
+        elbow_joint:         1.0
+        wrist_1_joint:       1.0
+        wrist_2_joint:       1.0
+        wrist_3_joint:       1.0
+
+    use_gravity_compensation: true
+    use_coriolis_compensation: true
+    use_friction: false
+    use_local_jacobian: true
+
+    limit_error: true
+    limit_torques: true
+    max_delta_tau: 0.5
+
+    joint_limit_repulsion:
+      enabled: true
+      safe_range: 0.1
+      max_torque: 5.0

@@ -1,0 +1,69 @@
+# crisp cartesian impedance (role) — UR5e in MuJoCo sim.
+#
+# Applies the `crisp_controllers/CartesianController` plugin in its
+# "cartesian_impedance" configuration (see docs/crisp_controllers.md):
+#   - non-zero Cartesian task stiffnesses (translation and rotation),
+#   - nullspace PD projected behind the Cartesian task via the
+#     "kinematic" projector so redundant motion is damped without
+#     fighting the task,
+#   - gravity + Coriolis compensation from pinocchio inside the
+#     controller (the sim's gravity_compensation.py still publishes but
+#     targets forward_effort_controller which is deactivated before this
+#     controller activates — see ADR-0007).
+#
+# On activation the controller captures the current tool0 pose as its
+# target (see cartesian_controller.cpp::on_activate), so the default
+# behaviour is "hold current pose". Callers can override by publishing
+# geometry_msgs/PoseStamped on /target_pose.
+#
+# Joint order matches third_party/ur_simulator's controller_manager
+# (unprefixed UR joint names; identical on ur5e and ur15).
+
+cartesian_impedance_controller:
+  ros__parameters:
+    joints:
+      - shoulder_pan_joint
+      - shoulder_lift_joint
+      - elbow_joint
+      - wrist_1_joint
+      - wrist_2_joint
+      - wrist_3_joint
+
+    end_effector_frame: tool0
+    base_frame: base
+
+    task:
+      k_pos_x: 400.0
+      k_pos_y: 400.0
+      k_pos_z: 400.0
+      k_rot_x: 30.0
+      k_rot_y: 30.0
+      k_rot_z: 30.0
+
+    nullspace:
+      stiffness: 10.0
+      damping: -1.0          # auto: 2*sqrt(stiffness)
+      projector_type: kinematic
+      max_tau: 20.0
+      regularization: 1.0e-06
+      weights:
+        shoulder_pan_joint:  1.0
+        shoulder_lift_joint: 1.0
+        elbow_joint:         1.0
+        wrist_1_joint:       1.0
+        wrist_2_joint:       1.0
+        wrist_3_joint:       1.0
+
+    use_gravity_compensation: true
+    use_coriolis_compensation: true
+    use_friction: false
+    use_local_jacobian: true
+
+    limit_error: true
+    limit_torques: true
+    max_delta_tau: 0.5
+
+    joint_limit_repulsion:
+      enabled: true
+      safe_range: 0.1
+      max_torque: 5.0
