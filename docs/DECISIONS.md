@@ -148,3 +148,39 @@ Format: ADR-lite. Do not delete past entries; supersede with a new one.
   sequentially instead of in parallel) but deterministic on both arms
   and every RMW. The fix lives on `third_party/ur_simulator`'s
   `auto_dev` branch; parent repo bumps the submodule pointer.
+
+---
+
+## ADR-0007 — crisp controllers own the effort interfaces exclusively
+
+- **Date:** 2026-04-23
+- **Status:** Accepted
+- **Context:** The MuJoCo effort-mode sim ships with a
+  `gravity_compensation.py` node that publishes gravity feed-forward +
+  PID + external torque sums to `/forward_effort_controller/commands`.
+  External controllers are meant to feed extra torques via
+  `/external_effort_commands`, which the gravity node adds to its own
+  output. That architecture assumes only `forward_effort_controller`
+  ever claims the ros2_control `effort` command interfaces. CRISP's
+  `CartesianController` (and any future torque controller) claims those
+  same interfaces directly at `on_activate`, so it cannot coexist with
+  `forward_effort_controller`.
+- **Decision:** For every crisp role bring-up (joint_impedance,
+  cartesian_impedance, gravity_compensation), `crisp_bringup.launch.py`
+  performs a strict `switch_controllers --deactivate
+  forward_effort_controller --activate <role>` once the role's
+  controller has been loaded `--inactive`. While crisp is active it is
+  the sole effort commander; the sim's `gravity_compensation.py` keeps
+  running but its publishes land on an inactive controller and are
+  ignored. Crisp provides its own gravity + Coriolis compensation via
+  pinocchio (`use_gravity_compensation: true`,
+  `use_coriolis_compensation: true` in every role yaml under
+  `bringup/config/crisp_*.{ur5e,ur15}.yaml`).
+- **Consequences:** We do not use `/external_effort_commands` in this
+  phase — that path is reserved for the sim's own
+  `forward_effort_controller`. Tests that bring up a crisp role must
+  assert both `forward_effort_controller=inactive` and
+  `<role>=active` so a partial swap cannot silently leave two
+  gravity-comp sources fighting for the arm. When M3's own simple joint
+  impedance lands, it will follow the same pattern (be the only effort
+  commander while active, compute its own gravity comp).

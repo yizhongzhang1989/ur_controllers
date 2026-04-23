@@ -76,10 +76,10 @@ launches.
 - [ ] Enumerate the three impedance controllers shipped by crisp; record
       their plugin names, command interfaces, and required params in
       `docs/crisp_controllers.md` (new, short reference file).
-- [ ] Controller 1 (crisp joint impedance): write
+- [x] Controller 1 (crisp joint impedance): write
       `bringup/config/crisp_joint_impedance.{ur5e,ur15}.yaml`, wire it into
       `bringup/launch/crisp_bringup.launch.py`, bring it up on ur5e.
-- [ ] Same controller, bring it up on ur15.
+- [x] Same controller, bring it up on ur15.
 - [ ] Controller 2 (second crisp impedance variant): same two-step rollout
       (ur5e, then ur15).
 - [ ] Controller 3 (third crisp impedance variant): same two-step rollout.

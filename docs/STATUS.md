@@ -1,19 +1,49 @@
 # Status
 
-_Last updated: 2026-04-22 (M2 kickoff: crisp controllers reference doc; sim-bringup spawner race fixed)._
+_Last updated: 2026-04-23 (M2: crisp joint_impedance_controller bring-up on ur5e and ur15 with regulation integration test)._
 
 ## Current milestone
 
-**M2 — `crisp_controllers` in sim** (just kicked off). M1 is complete.
-M2 step 1 (docs reference of crisp's controllers) is done; next is the
-first controller role — `joint_impedance_controller` — wired up on ur5e,
-then ur15, with an integration test. Priority order after M2: M3 (our own
-joint impedance), M4 (cartesian controllers), M5 (evaluation harness).
-Every sim task must pass on both `ur5e` and `ur15`. Real UR15 is
+**M2 — `crisp_controllers` in sim**, in progress. M1 is complete. Controller 1
+(the `joint_impedance_controller` role of `crisp_controllers/CartesianController`)
+is now brought up end-to-end on both `ur5e` and `ur15` via
+`bringup/launch/crisp_bringup.launch.py` with per-arm YAML under
+`bringup/config/`, and a regulation integration test
+(`tests/integration/test_crisp_joint_impedance.py`) asserts bounded tracking
+error on both arms. Next: Controller 2 (`cartesian_impedance_controller`
+role) same two-step rollout (ur5e, then ur15). Priority order after M2: M3
+(our own joint impedance), M4 (cartesian controllers), M5 (evaluation
+harness). Every sim task must pass on both `ur5e` and `ur15`. Real UR15 is
 explicitly out of scope.
 
 ## Last completed tasks
 
+- **Controller 1 (crisp joint impedance) on ur5e and ur15.**
+  - `bringup/config/crisp_joint_impedance.{ur5e,ur15}.yaml`: per-arm param
+    files for the `joint_impedance_controller` role of
+    `crisp_controllers/CartesianController` — all `task.k_*` = 0,
+    `nullspace.projector_type: none`, nullspace stiffness 50 with auto
+    damping, `use_gravity_compensation: true`,
+    `use_coriolis_compensation: true`. Joint list is the unprefixed UR set
+    matching the sim's controller_manager.
+  - `bringup/launch/crisp_bringup.launch.py`: takes `robot:={ur5e,ur15}` and
+    `mode:=joint` (cartesian/gravity wired later). Spawns the controller
+    `--inactive` with `--controller-type crisp_controllers/CartesianController`
+    and `--param-file <arm yaml>`, then atomically swaps
+    `forward_effort_controller` → `joint_impedance_controller` via
+    `ros2 control switch_controllers --strict` chained on spawner exit.
+    The sim's `gravity_compensation.py` still runs but only targets the now
+    inactive `forward_effort_controller`; crisp owns effort end-to-end via
+    its pinocchio-based gravity + Coriolis terms.
+  - `tests/integration/test_crisp_joint_impedance.py`: parametrised over
+    `{ur5e, ur15}`. Brings up the sim via `scripts/launch_sim.sh`, waits
+    for `joint_state_broadcaster` + `forward_effort_controller` active,
+    launches `crisp_bringup.launch.py`, asserts the swap landed (crisp
+    active, forward effort inactive), publishes `/target_joint` at
+    the current joint positions, and asserts max per-joint drift stays
+    under 0.15 rad over a 5 s window. `scripts/run_tests.sh` runs the
+    full integration suite (sim smoke × 2 arms + crisp × 2 arms) in
+    ~82 s, all green.
 - `ur_sim_mujoco.launch.py` (submodule `third_party/ur_simulator`,
   `auto_dev` branch): serialise controller spawners. JSB spawner runs
   first alone; the other five chain off its `OnProcessExit`. Adds
@@ -57,21 +87,29 @@ explicitly out of scope.
 
 ## Next task (agent should pick this up)
 
-Continue **M2**:
+Continue **M2** with **Controller 2 (crisp cartesian impedance)** — same
+two-step rollout pattern as Controller 1:
 
-1. Write `bringup/config/crisp_joint_impedance.{ur5e,ur15}.yaml` using the
-   role pattern documented in `docs/crisp_controllers.md` (k_pos_* = 0,
-   nullspace.stiffness > 0, `projector_type: none`). Pick joint order
-   matching the sim's controller_manager.
-2. Add `bringup/launch/crisp_bringup.launch.py` that accepts
-   `robot:={ur5e,ur15}` and `mode:={joint,cartesian,gravity}`; for this
-   iteration wire `mode:=joint` end-to-end. Deactivate
-   `forward_effort_controller` before activating the crisp controller
-   (only one effort commander at a time).
-3. Add `tests/integration/test_crisp_joint_impedance.py` parametrised over
-   `{ur5e, ur15}` that publishes a small `target_joint` regulation command
-   and asserts bounded tracking error on `/joint_states` within a fixed
-   window.
+1. Write `bringup/config/crisp_cartesian_impedance.{ur5e,ur15}.yaml`.
+   Use the `cartesian_impedance_controller` role from
+   `docs/crisp_controllers.md`: `k_pos_*` ≈ 400–500, `k_rot_*` ≈ 30,
+   `nullspace.stiffness` > 0 (default `projector_type: kinematic`),
+   `use_coriolis_compensation: true`, `use_gravity_compensation: true`,
+   `use_local_jacobian: true`. `end_effector_frame: tool0`,
+   `base_frame: base`, same unprefixed UR joint list.
+2. Extend `bringup/launch/crisp_bringup.launch.py`:
+   add `"cartesian"` to the `mode` choices and a
+   `("cartesian_impedance_controller", "crisp_cartesian_impedance")` entry
+   to `_ROLE_YAML_STEM`. The spawner + strict `switch_controllers` pattern
+   already works for this role — no structural changes needed.
+3. Add `tests/integration/test_crisp_cartesian_impedance.py`, parametrised
+   over `{ur5e, ur15}`. Read current `tool0` pose from `/tf` (or from
+   crisp's own `pose_broadcaster` if we enable it), publish the same pose
+   back on `/target_pose` (`geometry_msgs/PoseStamped`), assert bounded
+   joint drift over a fixed window. Reuse the helpers in
+   `test_crisp_joint_impedance.py`.
+
+Controller 3 (gravity compensation role) is the follow-up after Controller 2.
 
 See `docs/crisp_controllers.md` for plugin names, required interfaces, and
 the shared topic API (`target_pose`, `target_joint`, `target_wrench`).
@@ -98,6 +136,8 @@ the shared topic API (`target_pose`, `target_joint`, `target_wrench`).
 - `test_sim_smoke.py` validated via `scripts/run_tests.sh`: both `ur5e`
   and `ur15` pass (2 passed in ~25 s) after the spawner-serialisation
   fix in `ur_sim_mujoco.launch.py` (ADR-0006).
+- `test_crisp_joint_impedance.py` added and green on both arms; total
+  integration suite (4 tests) runs in ~82 s.
 
 ## Blockers / open questions for operator
 
