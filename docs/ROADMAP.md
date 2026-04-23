@@ -189,9 +189,17 @@ on both arms, for later comparison / use alongside our joint-space work.
       as `evaluation/compute_metrics.py` (+ 32 unit tests).
       Joint-space only in v1 — cartesian metrics are recorded as
       `skipped` pending FK (ADR-0010).
-- [ ] Comparison test: same scenarios on crisp-joint-impedance vs our
+- [x] Comparison test: same scenarios on crisp-joint-impedance vs our
       simple joint impedance, for both `ur5e` and `ur15`. Emit a report
-      under `evaluation/reports/`.
+      under `evaluation/reports/`. Landed as `evaluation/compare.py`
+      (+ 15 unit tests in `tests/unit/test_compare.py`). Aggregate-only
+      driver: enumerates `{scenario, controller, robot}` combos via
+      `run_evaluation.check_compatibility`, picks the newest valid
+      run dir per combo, invokes `compute_metrics_for_run`, and emits
+      `report.csv` + `report.md` under `evaluation/reports/<UTC-ts>/`.
+      Cartesian combos surface as `not_yet_evaluated` (ADR-0010). Live
+      sim dispatch deferred to a follow-up (the test gate can't spin
+      per-combo sims at M5 cost).
 
 ---
 

@@ -1,90 +1,114 @@
 # Status
 
-_Last updated: 2026-04-23 (feat(m5): metrics computation pipeline with
-step/regulation/sine coverage, cartesian deferred, and 32 new unit
-tests. Full test gate green in ~6:30.)_
+_Last updated: 2026-04-23 (feat(m5): comparison report driver
+`evaluation/compare.py` wrapping bullets 2 + 3 with CSV + Markdown
+output under `evaluation/reports/<UTC-ts>/`, 15 new unit tests. Full
+test gate green in ~6:30.)_
 
 ## Current milestone
 
-**M5 — evaluation and comparison harness: IN PROGRESS.** M0–M3 done.
-M4 bullets 1–4 done; the optional M4 bullet 5 (second cartesian mode)
-is parked on a human gate (sim F/T sensor patch on `auto_dev` —
-unchanged from prior iteration). M5 bullets 1 + 2 + 3 done; bullet 4
-(comparison report) is next.
+**M5 — evaluation and comparison harness: DONE for the M5 scope we can
+reach without hardware.** M0–M4 done (with M4 bullet 5 still parked
+behind a human gate for the sim F/T sensor patch). M5 bullets 1–4 are
+all ticked. Next milestone is either M4 bullet 5 (cartesian second
+mode, human-gated) or M-REAL (explicitly out-of-scope until operator
+approval).
 
-M5 bullet 3 landed this iteration as `evaluation/compute_metrics.py`
-(+ 32 new unit tests under `tests/unit/test_compute_metrics.py`).
-The script consumes a run directory produced by M5 bullet 2
-(`manifest.yaml`, `target.csv`, `joint_states.csv`, optionally
-`tau_d.csv`), computes `rmse`, `settling_time`, `overshoot`, and
-`control_effort`, and writes `metrics.yaml` + `metrics.csv` next to
-the inputs. The CLI exits `0` when every `pass_criteria` key passes
-or is skipped, `1` when any threshold is exceeded, `2` on malformed
-inputs. Invocation:
+M5 bullet 4 landed this iteration as `evaluation/compare.py` plus 15
+new unit tests in `tests/unit/test_compare.py`. The driver:
+
+1. Enumerates every `{scenario, controller, robot}` combination from
+   the requested matrix (defaults: all YAMLs under
+   `evaluation/scenarios/`, every `known_controllers()`, both
+   `{ur5e, ur15}`).
+2. Filters using `run_evaluation.check_compatibility` and each
+   scenario's `robots:` list. Incompatible combos are still surfaced
+   on a separate Markdown table so the reader can see why they were
+   excluded.
+3. For each compatible combo, finds the newest *valid* run dir under
+   `--runs-root` (newest name first, skipping partial runs that lack
+   `manifest.yaml` — see ADR-0011) and invokes the library-level
+   `compute_metrics.compute_metrics_for_run`, caching
+   `metrics.yaml` + `metrics.csv` next to the run.
+4. Emits `report.csv` + `report.md` under `--report-dir`
+   (default `evaluation/reports/<UTC-ts>/`, gitignored) with one row
+   per combination and one column per metric + overall status.
+
+Cartesian combos are reported as `not_yet_evaluated` per ADR-0010,
+even when a run dir exists — the report layer replaces the
+metrics-layer `overall_status` to make "FK deferred in v1" visible.
+Missing run dirs for *joint* combos are recorded as `no_run` and push
+the exit code to `1`; cartesian combos without a run are still
+`not_yet_evaluated` (the FK gap is the real reason, not the absent
+bag).
+
+Invocation:
 
 ```bash
-python3 evaluation/compute_metrics.py --run-dir <run_dir>
+# Default: aggregate every compatible combo in the canonical matrix
+# against evaluation/runs/, write to evaluation/reports/<UTC-ts>/.
+python3 evaluation/compare.py
+
+# Narrower run of the crisp-joint vs simple-joint comparison.
+python3 evaluation/compare.py \
+    --scenarios evaluation/scenarios/step.example.yaml \
+                evaluation/scenarios/regulation.example.yaml \
+    --controllers crisp_joint_impedance simple_joint_impedance \
+    --robots ur5e ur15 \
+    --report-dir /tmp/m5_compare
 ```
 
-Key observations from this iteration (relevant for future work):
+Exit codes:
 
-- **Metric definitions in v1.**
-  - `rmse` is joint-space RMSE per joint in rad, aggregated as the
-    max across joints (the worst joint sets the bound).
-  - `settling_time` is computed **only** for `scenario_type == step`
-    with a 5%-of-amplitude tolerance band (floor 0.01 rad); reported
-    as `inf` when a joint never settles before the end of the window.
-    Non-step scenarios record it as `not_applicable` (skipped by the
-    pass gate, never a failure).
-  - `overshoot` is percent excess past the post-step target, signed
-    by the direction of the step; step-only, same not-applicable rule
-    as settling.
-  - `control_effort` is **peak `|tau|`** across joints and time in
-    N·m, read from `tau_d.csv`. When the controller doesn't publish
-    `tau_d` (cartesian_motion), it is recorded as `skipped` and
-    doesn't fail the pass gate.
-- **Cartesian metrics deferred.** Cartesian regulation runs do not
-  record a TCP pose trajectory — the observed signal is
-  `/joint_states`, and converting that to a TCP pose needs FK on the
-  URDF chain which would pull in `tf2`/`pinocchio`. For now the
-  script emits a metrics file with every metric and every
-  `pass_criteria` key recorded as `skipped` with a clear reason, and
-  exits `0`. M5 bullet 4 (comparison report) will surface these as
-  "not yet evaluated"; a future iteration will add FK-backed
-  cartesian RMSE (likely via `tf2_ros` transform lookups against the
-  sim's `/tf` tree, since the controller already publishes it).
-- **Target / observed time alignment.** The live runner writes
-  `target.csv` with `t_s = i / rate_hz` from scenario start and
-  `joint_states.csv` with `t_s` from a monotonic clock that starts a
-  bit later (after the 1 s settle sleep in `_run_live`). The metrics
-  pipeline resamples observed onto the target time grid with linear
-  interpolation + zero-order-hold clamping at the boundaries; the
-  small wall-clock offset between the two CSVs is absorbed into that
-  clamp and manifests as a slight RMSE bias for highly-dynamic
-  scenarios. Good enough for regulation / step / slow sine; bullet 4
-  will revisit if comparison numbers start disagreeing with the
-  integration-test assertions.
-- **Scenario doc is loaded from the referenced YAML, not the
-  manifest.** The runner's manifest carries `scenario.name`,
-  `.type`, `.metrics`, `.pass_criteria`, and a `path`, but not
-  `command.per_joint_amplitude_rad` / `.step_time_s`. The metrics
-  script re-opens the scenario YAML at `scenario.path` (resolved
-  first against the repo root, then against the run dir) to recover
-  the step amplitudes. If the scenario file moves or is renamed
-  between run-time and metrics-time, `metrics.yaml` gets a clear
-  `FileNotFoundError` and exits 2 — that's the intended signal.
+- `0` — every compatible combo is `pass` or `not_yet_evaluated`.
+- `1` — at least one compatible combo is `fail` / `no_run` /
+  `metrics_error`.
+- `2` — driver misuse (bad CLI args, missing scenarios, unknown
+  controller, etc.).
+
+Live sim dispatch (spinning sim + controller per combo) is
+deliberately **not** wired in this iteration — a 20-combo matrix of
+~1 min/combo is too heavy for the test gate. The plan is: a human or
+the outer loop drives individual `run_evaluation.py` invocations (or
+a batch script) to populate `evaluation/runs/`, then re-runs
+`compare.py` over the populated directory. When live dispatch is
+added, it should subprocess `run_evaluation.py` (ROS/process isolation)
+while continuing to import `compute_metrics_for_run` directly (no gain
+from shelling out for pure Python work).
+
+Key decisions this iteration (see ADR-0011):
+
+- **Latest-valid run dir wins.** `run_evaluation.py` creates the run
+  dir *before* the live run finishes, so a crashed attempt leaves a
+  newer partial dir without `manifest.yaml`. `find_latest_run_dir`
+  sorts prefix matches newest → oldest and picks the first one that
+  has a `manifest.yaml`. This prevents a failed run from masking an
+  older successful one.
+- **Report-layer status differs from metrics-layer status for
+  cartesian.** `compute_metrics_for_run` returns `overall_status=pass`
+  for cartesian (because every pass key is `skipped`, which never
+  fails the gate). The report needs to surface that as
+  `not_yet_evaluated` to the human reader — done at the report layer
+  so the metrics CLI semantics stay stable.
+- **File-based module loading.** `compare.py` loads
+  `run_evaluation.py` / `compute_metrics.py` / `validate.py` via
+  `importlib.util.spec_from_file_location` — same pattern as
+  `run_evaluation.py` already uses. `evaluation/` is not a package
+  and shouldn't need to become one for bullet 4.
 
 ## Last completed tasks
 
-- **M5 bullet 3: `evaluation/compute_metrics.py`.** New files:
-  `evaluation/compute_metrics.py` (CLI + metric primitives +
-  pass-criteria evaluation), `tests/unit/test_compute_metrics.py`
-  (32 cases across `interp_at`, `load_series`, RMSE / settling /
-  overshoot / control-effort primitives, and the end-to-end
-  `compute_metrics_for_run` / `main` CLI for step / regulation /
-  sine / cartesian scenarios, including the fail-exit path). No
-  changes to `run_evaluation.py`; the two scripts are split to let
-  bullet 4 fan out runs and metrics independently.
+- **M5 bullet 4: `evaluation/compare.py`.** New files:
+  `evaluation/compare.py` (aggregate-only driver),
+  `tests/unit/test_compare.py` (15 cases covering combo enumeration,
+  latest-valid run-dir lookup, synthetic run-dir aggregation, CSV +
+  Markdown emission, and CLI exit codes). No changes to
+  `run_evaluation.py` or `compute_metrics.py` — the driver imports
+  both via file-based `importlib` so the existing modules stay
+  stable. `docs/ROADMAP.md` M5 bullet 4 ticked. `docs/DECISIONS.md`
+  gets ADR-0011 (aggregate-only, latest-valid, report-layer cartesian
+  status).
+- **M5 bullet 3: `evaluation/compute_metrics.py`.** See prior STATUS.
 - **M5 bullet 2: `evaluation/run_evaluation.py`.** See prior STATUS.
 - **M5 bullet 1: `evaluation/scenarios/*.yaml` schema v1.** See prior STATUS.
 - **M4 bullets 2 + 3 + 4: `cartesian_motion_controller` brought up on
@@ -94,26 +118,38 @@ Key observations from this iteration (relevant for future work):
 - **M3 — sim bring-up + regulation integration test for
   `simple_joint_impedance_controller` on `{ur5e, ur15}`.** See prior
   STATUS.
-- **M3 — control law baseline in `simple_joint_impedance_controller`.**
-  See prior STATUS.
-- **Fix: strictly serialise MuJoCo controller spawners
-  (`third_party/ur_simulator`).** See prior STATUS.
 
 ## Next task (agent should pick this up)
 
-**M5 bullet 4: comparison report.** Wrap bullets 2 + 3 into a single
-driver that runs each `{scenario, controller, robot}` combination
-that passes `check_compatibility`, invokes
-`evaluation/compute_metrics.py` on each resulting run dir, and emits
-a summary table under `evaluation/reports/` (CSV + Markdown) with
-one row per combination and one column per metric + pass status.
-The existing test gate covers the metric math; the new driver
-primarily needs integration-style coverage that its dispatch +
-report emission works against synthetic run dirs (same tmp-path
-pattern used by `test_compute_metrics.py`).
+**M5 bullet 4 is done; M5 is closed for the scope we can reach
+without new hardware / new simulator work.** The two remaining
+roadmap items are both **human-gated** and must not be entered
+autonomously:
 
-M4 bullet 5 (second cartesian mode) remains deferred behind a
-**human gate** (sim-side F/T sensor patch on `auto_dev`).
+- **M4 bullet 5** — second cartesian mode. Still gated on the sim
+  F/T sensor patch on `third_party/ur_simulator`'s `auto_dev`
+  branch. Operator must direct this work before the agent may enter
+  it (see AGENTS.md §7).
+- **M-REAL** — real UR15 bringup. Explicitly out of scope per
+  AGENTS.md §5 and ROADMAP (placeholder only).
+
+Suggested follow-ups (not blocking the outer loop but useful):
+
+- Live-dispatch mode for `compare.py` (subprocess
+  `run_evaluation.py` per compatible combo) so the comparison is
+  one command end-to-end once an operator is happy to pay the
+  per-combo ~1 min sim cost. Out-of-scope for the test gate, so
+  should land behind a `--live` flag with an explicit smoke test
+  on exactly one combo.
+- FK-backed cartesian metrics (ADR-0010) — would flip the
+  `not_yet_evaluated` rows into real numbers. Needs either
+  `pinocchio` (already pulled in by crisp) or `tf2_ros` transform
+  lookups during the run.
+
+The outer loop should treat the current green test gate as a good
+stopping point and wait for operator direction; two consecutive
+agent iterations with no meaningful unchecked work would otherwise
+trip the "no-progress" stop condition (AGENTS.md §8).
 
 ## Build status
 
@@ -127,15 +163,17 @@ M4 bullet 5 (second cartesian mode) remains deferred behind a
 ## Test status
 
 - `scripts/run_tests.sh` runs unit → colcon test → integration. Green
-  in ~6:30 this iteration (35 schema + 34 runner-dry-run + **32 new
-  metrics** unit tests, 27 colcon gtests, 12 integration tests).
-- Test counts: **101** pytest unit tests
+  in ~6:30 this iteration (35 schema + 34 runner-dry-run + 32
+  metrics + **15 new compare** unit tests, 27 colcon gtests, 12
+  integration tests).
+- Test counts: **116** pytest unit tests
   (`tests/unit/test_scenarios_schema.py` +
-  `test_run_evaluation_dry.py` + `test_compute_metrics.py`) + **22**
-  `test_math` gtests (simple_joint_impedance_controller) + **5**
-  `crisp_controllers` gtests + **12** integration tests (sim smoke +
-  3 crisp roles + our simple_joint_impedance_controller +
-  `cartesian_motion_controller`, each ×{ur5e, ur15}).
+  `test_run_evaluation_dry.py` + `test_compute_metrics.py` +
+  `test_compare.py`) + **22** `test_math` gtests
+  (simple_joint_impedance_controller) + **5** `crisp_controllers`
+  gtests + **12** integration tests (sim smoke + 3 crisp roles +
+  our simple_joint_impedance_controller + `cartesian_motion_controller`,
+  each ×{ur5e, ur15}).
 
 ## Blockers / open questions for operator
 
@@ -150,20 +188,17 @@ None currently blocking. Informational:
   `ft_sensor_ref_link` on the URDF chain plus an `~/ft_sensor_wrench`
   publisher. The UR sim does not currently expose an F/T sensor
   frame; those controllers therefore require a sim-side `auto_dev`
-  patch before they can be brought up end-to-end. Now directly
-  gating M4 bullet 5 — surface to the operator when/if that bullet
-  is picked up.
+  patch before they can be brought up end-to-end. Still gates M4
+  bullet 5; unchanged from prior iteration.
 - Gravity-comp hook for `simple_joint_impedance_controller` remains
   unused (pure PD holds both arms within the M3 tolerance).
-- The M5 runner's live path is not wired into `scripts/run_tests.sh`
-  yet — it spins a full sim+controller per run and would add ~1 min
-  per scenario × arm × controller, which is too heavy for the test
-  gate. M5 bullet 4 will get a targeted smoke test once the
-  comparison driver is in place.
 - Cartesian metrics remain deferred: computing TCP-pose RMSE needs
-  FK, which is not wired in v1 (see ADR-0010).
+  FK, which is not wired in v1 (see ADR-0010). `compare.py` now
+  surfaces cartesian combos as `not_yet_evaluated` so the gap is
+  visible without pretending it's passing.
+- `compare.py --aggregate-only` is the only mode implemented; live
+  matrix dispatch is deferred behind a future `--live` flag.
 
 ## Recent commits
 
 Run `git log --oneline -n 20` for the live list.
-

@@ -430,3 +430,67 @@ Format: ADR-lite. Do not delete past entries; supersede with a new one.
     `_nms` (N·m·s); switching to integral later would change the
     threshold numbers in committed scenario files, which is a
     schema-version-visible change and must go through a new ADR.
+
+---
+
+## ADR-0011 — Comparison report driver: aggregate-only, latest-valid, cartesian deferred at the report layer (M5)
+
+- **Date:** 2026-04-23
+- **Status:** Accepted
+- **Context:** ROADMAP M5 bullet 4 asks for a comparison report that
+  wraps bullets 2 + 3. Three design questions had to be answered:
+  (a) does the driver also drive live sim runs, or only aggregate
+  existing run dirs? (b) how does it pick a run dir when multiple
+  match a `{scenario, controller, robot}` combination, given that
+  `run_evaluation.py` creates the run dir *before* the live run
+  completes and so can leave partial directories behind? (c) how
+  does the report surface cartesian combos, which
+  `compute_metrics_for_run` returns with `overall_status=pass` (every
+  key `skipped`) but which ADR-0010 explicitly says are "not yet
+  evaluated"?
+- **Decision:**
+  - **Aggregate-only by default.** `evaluation/compare.py` has no
+    `--live` flag in v1. The test gate synthesises run dirs in
+    tmp_path and exercises the aggregation path end-to-end; a full
+    matrix of live sim runs (~1 min × 20 combos) is too heavy for
+    that gate. Operators (or a follow-up outer script) drive
+    `run_evaluation.py` themselves to populate `evaluation/runs/`,
+    then call `compare.py` to build the report. When live dispatch
+    does land it will subprocess `run_evaluation.py` for ROS/process
+    isolation while continuing to import `compute_metrics_for_run`
+    directly.
+  - **Latest-valid run dir wins.** Matching run dirs are sorted
+    newest → oldest by name (UTC timestamp
+    `YYYYMMDDTHHMMSSZ` is lexicographically sortable); the driver
+    picks the first one that contains a `manifest.yaml`
+    (the runner writes it last, so its presence is a soundness
+    check). This prevents a partial/failed newer run from masking an
+    older successful one.
+  - **Report-layer `not_yet_evaluated` for cartesian.** The report
+    overrides `overall_status` to `not_yet_evaluated` for combos
+    with `target.space == cartesian`, regardless of what
+    `compute_metrics_for_run` returned. Keeping the override at the
+    report layer (not inside `compute_metrics.py`) lets the metrics
+    CLI stay stable — its `overall_status` still means
+    "every pass key passed or was skipped" — while the human-
+    facing report correctly flags the FK gap. Rows also carry the
+    reason "cartesian metrics deferred in v1 (ADR-0010)".
+  - **Exit codes.** `0` when every compatible combo is
+    `pass` / `not_yet_evaluated`; `1` when any combo is
+    `fail` / `no_run` / `metrics_error`; `2` on driver misuse.
+    `no_run` for joint combos is a failure because a missing joint
+    run means the matrix is incomplete. Cartesian combos without a
+    run stay `not_yet_evaluated` (the FK gap is the dominant
+    reason, not the missing bag).
+- **Consequences:**
+  - `compare.py` imports `run_evaluation.py` and `compute_metrics.py`
+    via `importlib.util.spec_from_file_location` (matching
+    `run_evaluation.py`'s own pattern) so `evaluation/` stays a plain
+    directory, not a Python package.
+  - The outer loop can now run `python3 evaluation/compare.py` as a
+    cheap read-only health check of the `evaluation/runs/` tree —
+    even with no runs present it emits a valid report and exits 1 to
+    signal the matrix is empty.
+  - When cartesian FK metrics land (future ADR superseding ADR-0010),
+    the cartesian override in `compare.py` must be dropped in the
+    same change so the report starts showing real numbers.
