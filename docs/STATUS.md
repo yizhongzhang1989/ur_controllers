@@ -1,7 +1,9 @@
 # Status
 
-_Last updated: 2026-04-23 (docs(status): blocker-only iteration — no
-mandatory ROADMAP work remains; only human-gated items left.)_
+_Last updated: 2026-04-23 (fix(m4): cartesian_bringup fetches
+robot_description from the transient-local /robot_description topic
+instead of the RSP get_parameters service — removes a flaky first-run
+timeout observed in tests/integration/test_cartesian_motion.py[ur5e].)_
 
 ## Current milestone
 

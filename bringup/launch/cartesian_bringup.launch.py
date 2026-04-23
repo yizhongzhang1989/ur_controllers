@@ -12,9 +12,9 @@ controller pair).
 
 Steps:
 
-  1. Query ``/robot_state_publisher`` for its ``robot_description``
-     parameter (published with transient-local QoS by the sim's RSP
-     node) and serialise it into a temp YAML of the form
+  1. Subscribe to the transient-local ``/robot_description`` topic
+     published by the sim's ``/robot_state_publisher`` and serialise
+     its payload into a temp YAML of the form
      ``cartesian_motion_controller.ros__parameters.robot_description``.
      This is necessary because our sim hands ``robot_description`` to
      the controller manager via the ``/robot_description`` topic rather
@@ -30,7 +30,12 @@ Steps:
      there directly. The crisp controllers dodge this by querying
      ``/controller_manager`` themselves (``cartesian_controller.cpp:242``)
      — not an option for us since we must not patch the read-only
-     ``cartesian_controllers`` submodule (ADR-0003).
+     ``cartesian_controllers`` submodule (ADR-0003). We read from the
+     topic rather than ``/robot_state_publisher/get_parameters`` so
+     the first bring-up of a pytest session cannot trip on a DDS
+     service-response delivery failure ("failed to send response …
+     (timeout)") that would otherwise stall the whole launch for 30s
+     and then abort.
   2. Spawn ``cartesian_motion_controller`` ``--inactive`` with
      ``--controller-type
      cartesian_motion_controller/CartesianMotionController`` and both
@@ -54,6 +59,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import time
 from pathlib import Path
 
 import yaml
@@ -80,53 +86,75 @@ CONFIG_STEM = "cartesian_motion"
 DISPLACED_CONTROLLER = "joint_trajectory_controller"
 
 
-def _fetch_robot_description() -> str:
-    """Return the ``robot_description`` string currently published by
-    ``/robot_state_publisher``.
+def _fetch_robot_description(timeout_s: float = 60.0) -> str:
+    """Return the ``robot_description`` string currently published on
+    the ``/robot_description`` topic by ``/robot_state_publisher``.
 
-    Opens a short-lived rclpy context, calls ``get_parameters`` on the
-    RSP node, and returns the value. Raises ``RuntimeError`` on any
-    failure (service not reachable, empty value, etc.) so the launch
-    fails loudly rather than spawning a controller that would then
-    refuse to configure with "robot_description is empty".
+    Subscribes with transient-local durability + reliable reliability —
+    the same QoS combination used by ``controller_manager`` itself
+    (ros2_control humble, ``controller_manager.cpp`` ``robot_description``
+    subscriber) — so the latched last sample is delivered immediately
+    on subscribe. This path is more robust than calling
+    ``/robot_state_publisher/get_parameters``: on a fresh DDS graph
+    (first sim bring-up of a pytest session) the service round-trip
+    occasionally fails to deliver the response under FastDDS SHM
+    (``robot_state_publisher.rclcpp: failed to send response to
+    /robot_state_publisher/get_parameters (timeout)``) and the
+    parameter call blocks until its own timeout. The transient-local
+    topic does not have that failure mode because it is a one-way
+    push with a sample already queued by the publisher.
+
+    Raises ``RuntimeError`` on any failure (topic never delivers, empty
+    value, etc.) so the launch fails loudly rather than spawning a
+    controller that would then refuse to configure with
+    ``robot_description is empty``.
     """
     import rclpy  # lazy: requires the ROS env to be sourced at launch time
-    from rcl_interfaces.srv import GetParameters
-    from rclpy.parameter import Parameter
+    from rclpy.qos import (
+        QoSDurabilityPolicy,
+        QoSHistoryPolicy,
+        QoSProfile,
+        QoSReliabilityPolicy,
+    )
+    from std_msgs.msg import String
 
     own_context = not rclpy.ok()
     if own_context:
         rclpy.init()
     node = rclpy.create_node("_cartesian_bringup_rd_fetcher")
+    received: list[str] = []
+
+    def _cb(msg: String) -> None:
+        if msg.data and not received:
+            received.append(msg.data)
+
+    qos = QoSProfile(
+        depth=1,
+        reliability=QoSReliabilityPolicy.RELIABLE,
+        durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
+        history=QoSHistoryPolicy.KEEP_LAST,
+    )
+    sub = node.create_subscription(String, "/robot_description", _cb, qos)
     try:
-        client = node.create_client(GetParameters, "/robot_state_publisher/get_parameters")
-        if not client.wait_for_service(timeout_sec=30.0):
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline and not received:
+            rclpy.spin_once(node, timeout_sec=0.2)
+        if not received:
             raise RuntimeError(
-                "cartesian_bringup: /robot_state_publisher not reachable; "
-                "is the sim running (scripts/launch_sim.sh <robot> position)?"
+                "cartesian_bringup: timed out waiting for a transient-local "
+                "message on /robot_description after "
+                f"{timeout_s:.0f}s; is the sim running "
+                "(scripts/launch_sim.sh <robot> position)?"
             )
-        req = GetParameters.Request()
-        req.names = ["robot_description"]
-        future = client.call_async(req)
-        rclpy.spin_until_future_complete(node, future, timeout_sec=30.0)
-        if not future.done() or future.result() is None:
-            raise RuntimeError(
-                "cartesian_bringup: timed out fetching robot_description "
-                "from /robot_state_publisher."
-            )
-        values = future.result().values
-        if not values or values[0].type != Parameter.Type.STRING.value:
-            raise RuntimeError(
-                "cartesian_bringup: robot_description is missing or not a "
-                "string on /robot_state_publisher."
-            )
-        xml = values[0].string_value
+        xml = received[0]
         if not xml:
             raise RuntimeError(
-                "cartesian_bringup: /robot_state_publisher returned an " "empty robot_description."
+                "cartesian_bringup: /robot_description delivered an empty "
+                "robot_description string."
             )
         return xml
     finally:
+        node.destroy_subscription(sub)
         node.destroy_node()
         if own_context:
             try:
