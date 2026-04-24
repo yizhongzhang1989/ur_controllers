@@ -1,15 +1,18 @@
 # Status
 
-_Last updated: 2026-04-24 (stage-2 cartesian-mode evaluator pre-bake
-landed as `tests/integration/r2_stage2_cartesian.py` + 33 unit tests
-+ `stage2_tcp` block in both arm expectation YAMLs — closes the
-cartesian-mode branch of R2 stage-2's "kinematic consistency" check
-(5 mm + 2°) that was previously deferred in
-`r2_stage2_assertions.py`. Evaluator composes with
-`r2_tcp_from_joints.py` (injected FK) so the stage-2 orchestrator can
-now assert both joint-space and cartesian-mode outcomes without any
-extra glue. M6.0 operator gate still active for every bullet that
-requires live sim changes.)._
+_Last updated: 2026-04-24 (R3 payload validator pre-bake landed as
+`tests/integration/payload_validation.py` + 40 unit tests — closes
+the preflight seam shared by M6.16 (`~/set_ee_payload` service input
+validation) and M6.17 (MJCF body-attachment preflight). Pure stdlib
+`validate_payload` / `validate_catalog` enforce v1 physical-validity
+rules: finite mass ≥ 0, finite diagonal inertia, v1 diagonal-only
+tensor (off-diagonals exactly 0.0), sentinel consistency
+(mass == 0 ⇔ inertia == 0), v1 modelling constraint (mass > 0 ⇒
+every principal moment > 0 — no point masses), triangle inequality
+on principal moments, finite pose, and catalog-level unique names.
+Interop test validates the in-tree `payloads.yaml` end-to-end. M6.0
+operator gate still active for every bullet that requires live sim
+changes.)._
 
 ## Current milestone
 
@@ -69,11 +72,57 @@ Still missing on the pre-bake chain:
    deliberately keep these out of tree so the source / licensing
    decision is independent of the orchestrator wiring.
 2. M6.19 payload parametrisation across R2 stages (needs M6.16–
-   M6.18 to land first).
+   M6.18 to land first). The validator landed this iteration is
+   the preflight seam those bullets will plug into; it is
+   deliberately decoupled from the message / MJCF shape so the
+   `ur_sim_msgs/EePayload` vs `geometry_msgs/Inertia + PoseStamped`
+   decision (M6 R3 blocker #3) can be made independently.
 
 ## Last completed tasks
 
-- **This iteration: stage-2 cartesian-mode evaluator (closes the
+- **This iteration: R3 payload validator pre-bake (closes the
+  preflight seam shared by M6.16 + M6.17).** Added
+  `tests/integration/payload_validation.py` exporting
+  `validate_payload(payload: Payload) -> None` and
+  `validate_catalog(catalog: PayloadCatalog) -> None`. Both raise
+  `ValueError` with a self-locating message (every error echoes
+  `payload '<name>'`) that names the offending field and value.
+  v1 rule set, each pinned by its own failure test:
+  mass finiteness + non-negativity; every inertia key present and
+  finite; diagonal-only tensor (`ixy == ixz == iyz == 0` exactly —
+  v1 targets MuJoCo's `diaginertia`, documented as a v1 policy not
+  a physics claim); sentinel consistency `mass == 0 ⇔ inertia ==
+  0` (zero-mass-with-nonzero-inertia and mass-without-inertia both
+  rejected); v1 modelling constraint banning point masses (`mass >
+  0 ⇒ ixx, iyy, izz > 0`); triangle inequality on the three
+  principal moments with all three cyclic permutations reported
+  separately for self-locating failures; finite pose (`pose_xyz`,
+  `pose_rpy` as 3-tuples of finite floats). `validate_catalog`
+  additionally rejects duplicate payload names (catalog-level
+  invariant — `PayloadCatalog.get()` would be ambiguous under
+  collision). Pure stdlib; imports only `math` and the existing
+  `expectations_loader.Payload` dataclass, so ROS-free tooling can
+  consume it. Pinned by 40 unit tests in
+  `tests/unit/test_payload_validation.py`: export surface,
+  happy-path on all three built-in payloads via `load_payloads()`,
+  synthetic happy-path (zero-mass/zero-inertia; positive-mass
+  diagonal; triangle-inequality equality boundary; nonzero pose),
+  and the full rejection matrix — empty name, negative mass, NaN
+  / +inf / -inf mass and inertia (separately per rubber-duck
+  guidance), missing inertia key, non-zero / negative
+  off-diagonal (parametrised over `ixy, ixz, iyz`), zero-mass with
+  nonzero inertia, zero / negative principal moment with positive
+  mass (parametrised over `ixx, iyy, izz`), all three triangle-
+  inequality violation directions, wrong-length / NaN / inf pose
+  triplets for both `pose_xyz` and `pose_rpy`, error-message name
+  echo, catalog with bad entry, catalog with duplicate names,
+  catalog with unique names (happy), empty catalog (happy). Unit
+  gate now reports **562 passed** (up from 522). Full
+  `scripts/run_tests.sh` green end-to-end: unit (562) + colcon
+  test (10 packages, 22 `test_math` + 5 `test_filters` + 4
+  `test_pseudo_inverse` gtests) + integration (12 launch tests ×
+  {ur5e, ur15}), ~5:01 wall clock.
+- **Prior iteration: stage-2 cartesian-mode evaluator (closes the
   deferred "FK / TCP-level checks" note in
   `r2_stage2_assertions.py`).** Added
   `tests/integration/r2_stage2_cartesian.py` exporting
@@ -365,9 +414,8 @@ Still missing on the pre-bake chain:
 
 ## Test status
 
-- Unit tests: `scripts/run_tests.sh --unit-only` — **522 passed**
-  (up from 488; +33 cartesian-evaluator tests plus +1 new schema
-  equality test).
+- Unit tests: `scripts/run_tests.sh --unit-only` — **562 passed**
+  (up from 522; +40 payload-validator tests).
 - Integration tests: re-run this iteration — all **12** launch
   tests green (sim smoke + 3 crisp roles + simple_joint_impedance
   + cartesian_motion, each × {ur5e, ur15}); ~4:50 wall clock.
