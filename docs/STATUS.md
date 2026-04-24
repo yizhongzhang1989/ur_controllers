@@ -1,23 +1,16 @@
 # Status
 
-_Last updated: 2026-04-25 (**flake fix on
-`tests/integration/test_cartesian_motion.py`**). Iteration 92's
-test gate failed with `test_cartesian_motion_regulation[ur15]`
-timing out at 60s while the bring-up's controller_manager spawner
-sat indefinitely on "waiting for service
-/controller_manager/list_controllers" — a transient FastDDS
-service-discovery glitch (the ur5e variant in the same run, plus
-all rclpy clients in the test fixture, reached the same
-controller_manager fine; iterations 1..91 all passed clean). The
-fixture now restarts the cartesian bring-up exactly once if the
-spawner does not log "Loaded cartesian_motion_controller" within
-30s, which gives the spawner subprocess a fresh DDS participant
-without touching the (healthy) sim. The 60s
-`CONTROLLER_READY_TIMEOUT_S` assertion is unchanged — no test was
-weakened. Full gate re-ran green (unit 1522 + colcon 10 packages +
-12 launch tests × {ur5e, ur15}, **6:11 wall clock**)._
+_Last updated: 2026-04-25 (**fifty-sixth blocker-only refresh**).
+Re-read AGENTS.md, ROADMAP.md, this file, and DECISIONS.md.
+Confirmed nothing has changed: M6.0 is still the active operator
+gate, every in-scope M6 bullet still depends on it, the pre-bake
+chain remains complete, and the four remaining open seams are all
+deferred-by-design or gated on M6.0. Code-carrying progress is
+still pinned at commit `a5ba62f` (the cartesian-bringup spawner
+flake fix from iteration 92). No source files touched this
+iteration; STATUS-only commit per AGENTS.md §3 step 7._
 
-_Note: this is now the **fifty-fifth** consecutive no-progress iteration.
+_Note: this is now the **fifty-sixth** consecutive no-progress iteration.
 Per AGENTS.md §8, the outer loop's no-progress guard counts
 consecutive iterations with **no commit**; these STATUS-only commits
 technically satisfy the guard but the operator should be aware that
@@ -52,7 +45,7 @@ iterations is **complete for the gated R2/R3 orchestrator**; remaining
 open seams are all either deferred-by-design or gated on M6.0 (see
 "Pre-bake chain status" below).
 
-This is the fifty-fifth consecutive iteration with this same
+This is the fifty-sixth consecutive iteration with this same
 conclusion; no operator input has been received in the interval. Per
 AGENTS.md §3 step 7, the agent commits only this STATUS update and
 stops.
@@ -148,7 +141,7 @@ Unblocked ordering:
 
 Active for **M6** (please resolve in order):
 
-- **[M6.0 gate — still active, 55th iteration]** Decide how to vendor
+- **[M6.0 gate — still active, 56th iteration]** Decide how to vendor
   the `mujoco_ros2_control` patch required for claim-aware ctrl
   routing. ADR-0012 §Decisions-to-gate lists three options;
   recommendation is **(a) submodule under
