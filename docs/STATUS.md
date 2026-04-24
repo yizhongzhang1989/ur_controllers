@@ -1,8 +1,10 @@
 # Status
 
-_Last updated: 2026-04-24 (R2 expectations loader + 29 unit tests
-landed; pre-bakes the consumer API for M6.12–M6.14. M6.0 operator
-gate still active for every bullet that requires live sim changes)._
+_Last updated: 2026-04-24 (R2 signal-analysis helpers + 19 unit
+tests landed; pre-bakes the measured-signal assertion vocabulary
+that R2 stage-1 tests will call on ``/joint_states`` traces. M6.0
+operator gate still active for every bullet that requires live sim
+changes)._
 
 ## Current milestone
 
@@ -29,29 +31,35 @@ Still gated on **M6.0** (vendoring strategy for
 7. M6.10 / M6.11 / M6.16–M6.19 can interleave once M6.0 gives us
    a target `ur_robot_driver` version and payload plumbing.
 
-With M6.15's schema live and the loader + helpers now pre-baked,
-M6.12–M6.14 (R2 tests) can be drafted against the expectation
+With M6.15's schema live plus the loader, theoretical helpers, and
+now the measured-signal helpers all pre-baked, M6.12–M6.14 (R2
+tests) can be authored end-to-end against the expectation + signal
 vocabulary *before* the sim bullets land — they just can't run
 until M6.5 ships.
 
 ## Last completed tasks
 
-- **This iteration: R2 expectations loader.** New
-  `tests/integration/expectations_loader.py` exposes typed
-  dataclasses (`ArmExpectation`, `ControllerExpectation`,
-  `JointExpectation`, `PayloadCatalog`) plus
-  `second_order_response(K, D, J)` and
-  `damping_ratio_within_band()` helpers used by R2 stage-1.
-  Lookup helpers raise `KeyError`/`ValueError` on drift instead
-  of returning `None`, and the loader rejects
-  `bool`-as-number (YAML's `true`/`false` are `int` subclasses
-  in Python). Pinned by 29 unit tests in
-  `tests/unit/test_expectations_loader.py` (happy path on both
-  arms, payload iteration, numeric sanity for the second-order
-  formulas, damping-ratio band math, and five schema-drift guards
-  that write doctored YAML into `tmp_path`). Pre-bakes the
-  consumer API so M6.12–M6.14 (R2 tests) can be authored the
-  moment M6.0 is resolved.
+- **This iteration: R2 signal-analysis helpers.** New
+  `tests/integration/signal_analysis.py` exposes the
+  measured-signal side of the R2 stage-1 assertion vocabulary:
+  `steady_state_error`, `drift_peak_to_peak`, `velocity_rms` on
+  trailing windows, `find_extrema` + `damping_ratio_from_step`
+  (half-cycle log-decrement), and `detect_limit_cycle` (naïve
+  one-sided DFT over a frequency band with a median noise
+  floor). Pure stdlib — same dependency posture as
+  `expectations_loader.py` — so it runs in the unit-test gate
+  without numpy or ROS. Pinned by 19 unit tests in
+  `tests/unit/test_signal_analysis.py` exercising synthetic
+  step, sine, and noise signals with known ground truth, plus
+  five validation guards (length mismatch, non-monotonic time,
+  non-uniform sampling, empty band, bad params). Together with
+  `expectations_loader.py` this closes the "theoretical vs
+  measured" vocabulary R2 stage-1 needs; the R2 integration
+  tests (M6.12) can now be authored as a straight mapping
+  between `ArmExpectation.controller(c).tol(k)` and these
+  helpers.
+- **Prior iteration: R2 expectations loader** (+29 unit tests
+  in `test_expectations_loader.py`).
 - **Prior iteration: M6.15 — R2 expectation schema + first-draft
   values** (`tests/integration/expectations/{ur5e, ur15,
   payloads}.yaml` + 7 schema tests; ADR-0013).
@@ -79,8 +87,8 @@ until M6.5 ships.
 
 ## Test status
 
-- Unit tests: `scripts/run_tests.sh --unit-only` — **208 passed**
-  (up from 179; +29 from `test_expectations_loader.py`).
+- Unit tests: `scripts/run_tests.sh --unit-only` — **227 passed**
+  (up from 208; +19 from `test_signal_analysis.py`).
 - Integration tests (pre-M6): still expected green —
   **22** `test_math` gtests + **5** `crisp_controllers` gtests +
   **12** integration tests (sim smoke + 3 crisp roles +
