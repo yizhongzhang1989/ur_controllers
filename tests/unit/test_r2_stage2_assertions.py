@@ -380,6 +380,144 @@ def test_empty_measured_positions_yields_trivially_ok():
 
 
 # ---------------------------------------------------------------------------
+# Terminal settle window
+# ---------------------------------------------------------------------------
+
+
+def test_settle_window_default_matches_final_sample():
+    """settle_window_s=0 (default) uses the last-sample error verbatim."""
+    ts, measured, commanded = _identical_traces()
+    measured["elbow_joint"][-1] += 0.04
+    result = r2s2.evaluate_all_joints_joint_space(
+        controller="x",
+        times=ts,
+        measured_positions=measured,
+        commanded_positions=commanded,
+        completion_tol_rad=1.0,
+        peak_tracking_err_rad=1.0,
+    )
+    elbow = next(j for j in result.per_joint if j.joint == "elbow_joint")
+    assert elbow.metrics["final_err_rad"] == pytest.approx(0.04, abs=1e-12)
+    # No settle-window diagnostic when disabled.
+    assert "settle_window_samples" not in elbow.metrics
+
+
+def test_settle_window_averages_trailing_window():
+    """With settle_window_s > 0, final_err becomes the trailing mean."""
+    ts, measured, commanded = _identical_traces()
+    # dt = 0.01 s, ts[-1] = 1.0 s. settle_window_s = 0.099 s → threshold
+    # = 0.901 s ⇒ samples at indices 91..100 qualify (10 samples). Inject
+    # a final-sample-only spike that would trip a 0.01-rad tolerance in
+    # single-sample mode, but averages down to 0.001 rad over the window.
+    measured["wrist_1_joint"][-1] += 0.01
+    result = r2s2.evaluate_all_joints_joint_space(
+        controller="x",
+        times=ts,
+        measured_positions=measured,
+        commanded_positions=commanded,
+        completion_tol_rad=0.005,
+        peak_tracking_err_rad=1.0,
+        settle_window_s=0.099,
+    )
+    wrist = next(j for j in result.per_joint if j.joint == "wrist_1_joint")
+    assert wrist.metrics["settle_window_samples"] == pytest.approx(10.0)
+    assert wrist.metrics["final_err_rad"] == pytest.approx(0.001, abs=1e-12)
+    assert wrist.ok  # 0.001 < 0.005 tol
+
+
+def test_settle_window_persistent_error_still_trips_tol():
+    """A sustained trailing error survives the trailing mean."""
+    ts, measured, commanded = _identical_traces()
+    # Offset the last 10 samples of elbow_joint by 0.02 rad; pick a
+    # matching 0.099 s window so all 10 perturbed samples land inside it.
+    n = len(ts)
+    for i in range(n - 10, n):
+        measured["elbow_joint"][i] += 0.02
+    result = r2s2.evaluate_all_joints_joint_space(
+        controller="x",
+        times=ts,
+        measured_positions=measured,
+        commanded_positions=commanded,
+        completion_tol_rad=0.005,
+        peak_tracking_err_rad=1.0,
+        settle_window_s=0.099,
+    )
+    elbow = next(j for j in result.per_joint if j.joint == "elbow_joint")
+    assert elbow.metrics["settle_window_samples"] == pytest.approx(10.0)
+    assert elbow.metrics["final_err_rad"] == pytest.approx(0.02, abs=1e-12)
+    assert not result.ok
+    assert any("elbow_joint: final_err_rad=" in f for f in result.failures)
+
+
+def test_settle_window_covers_only_final_sample_when_smaller_than_dt():
+    """A settle window smaller than dt still includes the final sample."""
+    ts, measured, commanded = _identical_traces()
+    measured["wrist_3_joint"][-1] += 0.3
+    result = r2s2.evaluate_all_joints_joint_space(
+        controller="x",
+        times=ts,
+        measured_positions=measured,
+        commanded_positions=commanded,
+        completion_tol_rad=1.0,
+        peak_tracking_err_rad=1.0,
+        settle_window_s=0.001,  # < dt = 0.01
+    )
+    wrist = next(j for j in result.per_joint if j.joint == "wrist_3_joint")
+    # Only the final sample qualifies ⇒ mean of a single-element list.
+    assert wrist.metrics["settle_window_samples"] == pytest.approx(1.0)
+    assert wrist.metrics["final_err_rad"] == pytest.approx(0.3, abs=1e-12)
+
+
+def test_settle_window_negative_raises():
+    ts, measured, commanded = _identical_traces()
+    with pytest.raises(ValueError, match="settle_window_s must be >= 0"):
+        r2s2.evaluate_all_joints_joint_space(
+            controller="x",
+            times=ts,
+            measured_positions=measured,
+            commanded_positions=commanded,
+            completion_tol_rad=1.0,
+            peak_tracking_err_rad=1.0,
+            settle_window_s=-0.001,
+        )
+
+
+def test_settle_window_larger_than_span_raises():
+    ts, measured, commanded = _identical_traces()
+    span = ts[-1] - ts[0]
+    with pytest.raises(ValueError, match="exceeds trace span"):
+        r2s2.evaluate_all_joints_joint_space(
+            controller="x",
+            times=ts,
+            measured_positions=measured,
+            commanded_positions=commanded,
+            completion_tol_rad=1.0,
+            peak_tracking_err_rad=1.0,
+            settle_window_s=span + 0.01,
+        )
+
+
+def test_settle_window_equal_to_span_accepts_all_samples():
+    """settle_window_s == span ⇒ mean over every sample in the trace."""
+    ts, measured, commanded = _identical_traces()
+    # Perfect tracking so the mean is exactly 0 regardless of window size.
+    result = r2s2.evaluate_all_joints_joint_space(
+        controller="x",
+        times=ts,
+        measured_positions=measured,
+        commanded_positions=commanded,
+        completion_tol_rad=1e-9,
+        peak_tracking_err_rad=1e-9,
+        settle_window_s=ts[-1] - ts[0],
+    )
+    assert result.ok
+    n = len(ts)
+    for j in result.per_joint:
+        assert j.metrics["settle_window_samples"] == pytest.approx(float(n))
+        assert j.metrics["final_err_rad"] == pytest.approx(0.0, abs=1e-12)
+
+
+# ---------------------------------------------------------------------------
 # Dunders
 # ---------------------------------------------------------------------------
 

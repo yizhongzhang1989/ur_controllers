@@ -1,8 +1,9 @@
 # Status
 
-_Last updated: 2026-04-24 (stage-2 tolerance block landed in the R2
-expectation YAMLs + loader + schema tests. M6.0 operator gate still
-active for every bullet that requires live sim changes)._
+_Last updated: 2026-04-24 (stage-2 evaluator gains an optional terminal
+settle window — `completion_tol_rad` now samples a trailing mean when
+`settle_window_s > 0`. M6.0 operator gate still active for every bullet
+that requires live sim changes)._
 
 ## Current milestone
 
@@ -30,16 +31,19 @@ Still gated on **M6.0** (vendoring strategy for
    a target `ur_robot_driver` version and payload plumbing.
 
 With M6.15's schema live plus the loader, theoretical helpers,
-measured-signal helpers, the stage-1 assertion harness, the stage-2
-joint-space harness, and now the per-arm stage-2 tolerance block
-wired through the loader, M6.12 (R2 stage-1) and the joint-space
-path of M6.13 (R2 stage-2) can both be authored end-to-end as
-sim-collection orchestrators — they just can't run until M6.5 ships.
-When that orchestrator lands it should include a terminal settle
-window before sampling `|q(t_end) - q_cmd(t_end)|` for the
-`completion_tol_rad` check (the tolerance is tighter than
-`peak_tracking_err_rad` on purpose). Still missing on the pre-bake
-chain:
+measured-signal helpers, stage-1 assertion harness, stage-2
+joint-space harness (now with settle-window support), per-arm
+stage-2 tolerance block wired through the loader, M6.12 (R2
+stage-1) and the joint-space path of M6.13 (R2 stage-2) can both
+be authored end-to-end as sim-collection orchestrators — they
+just can't run until M6.5 ships. The orchestrator should pass
+its probe's settle-window length (from the scenario definition)
+directly as `settle_window_s` into
+`evaluate_all_joints_joint_space`; the evaluator averages
+`|q(t) - q_cmd(t)|` over the trailing window and uses that mean
+as `final_err_rad`, so a tighter `completion_tol_rad` than
+`peak_tracking_err_rad` is meaningful. Still missing on the
+pre-bake chain:
 
 1. M6.13 cartesian-mode / FK-based kinematic-consistency branch
    (needs a UR FK module; source and licensing to be agreed).
@@ -49,33 +53,39 @@ chain:
 
 ## Last completed tasks
 
-- **This iteration: R2 stage-2 tolerance block in the expectation
-  YAMLs.** Added a `stage2:` block with
-  `completion_tol_rad=0.05`, `peak_tracking_err_rad=0.15`,
-  `saturation_hold_ms=100.0` to both
-  `tests/integration/expectations/ur5e.yaml` and `ur15.yaml`
-  (identical values — the schema test now pins full block equality
-  between arms, not just matching key sets, so a per-arm tweak has
-  to be explicit). Values stay `draft: true` per ADR-0013;
-  `peak_tracking_err_rad` mirrors the stage-1 `bounded_err_rad`
-  bound and `saturation_hold_ms` mirrors the ROADMAP R2 100 ms
-  figure. Loader extended with a `Stage2Tolerances` frozen
-  dataclass whose field names match the kwargs of
-  `r2_stage2_assertions.evaluate_all_joints_joint_space`, exposed
-  as `ArmExpectation.stage2`; missing or partial `stage2` blocks
-  raise at load time (same strictness as the rest of the loader).
-  Pinned by +7 unit tests: stage-2 schema per-arm, cross-arm block
-  equality, loader happy-path per arm, identical-across-arms at
-  the loader layer, reject-missing-block, reject-partial-block,
-  reject-non-numeric. No change to `r2_stage2_assertions.py`
-  itself — its functional kwargs API stays untouched; the loader
-  gives test authors a typed source-of-truth for the numbers.
+- **This iteration: stage-2 evaluator terminal settle window.**
+  Extended `tests/integration/r2_stage2_assertions.py`
+  `evaluate_all_joints_joint_space` with a `settle_window_s: float
+  = 0.0` kwarg. When positive, the motion-completion check
+  averages `|q(t) - q_cmd(t)|` over every sample whose timestamp
+  is within `settle_window_s` of `times[-1]` (at minimum the
+  final sample) and reports the mean as `final_err_rad`; a
+  `settle_window_samples` diagnostic metric is exposed so
+  orchestrator artefacts can log the effective window size on
+  non-uniform sampling. Default `0.0` preserves existing
+  single-sample behaviour — the seven pre-existing stage-2 tests
+  pass unchanged. Validates `settle_window_s >= 0` and
+  `settle_window_s <= times[-1] - times[0]` at entry; both raise
+  `ValueError` with the same strictness as the rest of the
+  harness. Pinned by +7 unit tests in
+  `tests/unit/test_r2_stage2_assertions.py` covering: default =
+  final-sample behaviour, trailing-mean damps a final-sample
+  spike, persistent trailing error survives the mean, window
+  smaller than `dt` degenerates to the single final sample,
+  negative window rejected, over-span window rejected,
+  window == span covers every sample. Unit gate now reports
+  **278 passed** (up from 271).
+- **Prior iteration: R2 stage-2 tolerance block in the expectation
+  YAMLs.** Added `stage2:` block with `completion_tol_rad=0.05`,
+  `peak_tracking_err_rad=0.15`, `saturation_hold_ms=100.0` to
+  both `tests/integration/expectations/ur5e.yaml` and `ur15.yaml`
+  and exposed it via the loader as `ArmExpectation.stage2`.
 - **Prior iteration: R2 stage-2 assertion harness (joint-space).**
   `tests/integration/r2_stage2_assertions.py` +
-  `tests/unit/test_r2_stage2_assertions.py` (19 unit tests) —
-  per-joint motion-completion, peak-tracking, and torque-saturation-
-  hold evaluators; reuses the stage-1 `_longest_contiguous_ms`
-  helper via the sibling-module pattern.
+  `tests/unit/test_r2_stage2_assertions.py` — per-joint motion-
+  completion, peak-tracking, and torque-saturation-hold
+  evaluators; reuses the stage-1 `_longest_contiguous_ms` helper
+  via the sibling-module pattern.
 - **Prior iteration: R2 stage-1 assertion harness** pairs
   expectations with measured signals for the three response models.
 - **Prior iteration: R2 signal-analysis helpers.**
@@ -108,16 +118,16 @@ chain:
 
 ## Test status
 
-- Unit tests: `scripts/run_tests.sh --unit-only` — **271 passed**
-  (up from 264; +7 tests pinning the stage-2 block).
+- Unit tests: `scripts/run_tests.sh --unit-only` — **278 passed**
+  (up from 271; +7 tests pinning the settle-window kwarg).
 - Integration tests (pre-M6): still expected green —
   **22** `test_math` gtests + **5** `crisp_controllers` gtests +
   **12** integration tests (sim smoke + 3 crisp roles +
   simple_joint_impedance + cartesian_motion, each × {ur5e,
-  ur15}). Not re-run this iteration: only YAML + loader + unit
-  tests changed; nothing the integration suite depends on moved.
+  ur15}). Not re-run this iteration: only the unit-gated stage-2
+  module changed; nothing the integration suite depends on moved.
 - `pre-commit run --files <changed>`: clean (trim trailing
-  whitespace, EOL fixer, check-yaml, ruff, ruff-format).
+  whitespace, EOL fixer, ruff, ruff-format).
 
 ## Blockers / open questions for operator
 

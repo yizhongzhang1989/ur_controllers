@@ -27,7 +27,12 @@ This module covers the joint-space branch of *kinematic consistency*
 plus the *no-stall* branch. Namely, per joint:
 
 1. **Motion completion** — ``|q(t_end) - q_cmd(t_end)|`` within
-   ``completion_tol_rad``.
+   ``completion_tol_rad``. When ``settle_window_s > 0`` the
+   completion error is the *mean* of ``|q(t) - q_cmd(t)|`` over the
+   trailing ``settle_window_s`` seconds instead of the single final
+   sample — the settled reading the stage-2 orchestrator uses so a
+   tighter ``completion_tol_rad`` than ``peak_tracking_err_rad`` is
+   meaningful (see STATUS note for ``M6.13``).
 2. **Peak tracking error** — ``max_t |q(t) - q_cmd(t)|`` within
    ``peak_tracking_err_rad``.
 3. **Torque-saturation hold** — if a torque trace and an effort
@@ -205,6 +210,7 @@ def evaluate_all_joints_joint_space(
     torques: Optional[Mapping[str, Sequence[float]]] = None,
     effort_limits_nm: Optional[Mapping[str, float]] = None,
     saturation_hold_ms: float = 100.0,
+    settle_window_s: float = 0.0,
 ) -> Stage2Result:
     """Evaluate R2 stage-2 joint-space tolerances for all joints at once.
 
@@ -221,8 +227,11 @@ def evaluate_all_joints_joint_space(
     commanded_positions:
         Joint name → commanded position trace ``q_cmd(t)`` (rad).
     completion_tol_rad:
-        Absolute bound on ``|q(t_end) - q_cmd(t_end)|`` — the motion-
-        completion check.
+        Absolute bound on the completion error — by default the
+        single-sample ``|q(t_end) - q_cmd(t_end)|``; when
+        ``settle_window_s > 0`` this becomes the mean absolute error
+        over the trailing settle window, matching the orchestrator
+        convention noted in ``docs/STATUS.md`` for M6.13.
     peak_tracking_err_rad:
         Absolute bound on ``max_t |q(t) - q_cmd(t)|`` — the joint-space
         kinematic-consistency check for R2 stage-2.
@@ -237,17 +246,51 @@ def evaluate_all_joints_joint_space(
         Tolerance (ms) for the longest contiguous run where
         ``|tau| >= effort_limit``. Default 100 ms matches R2 text in
         ``docs/ROADMAP.md``.
+    settle_window_s:
+        Length (s) of the trailing window used to sample the motion-
+        completion error. Default ``0.0`` ⇒ single-sample final error
+        (backwards compatible). When positive, the evaluator averages
+        ``|q(t) - q_cmd(t)|`` over samples whose timestamp is within
+        ``settle_window_s`` of ``times[-1]`` and uses that mean as the
+        reported ``final_err_rad`` metric; also exposes
+        ``settle_window_samples`` on every joint for diagnostics. The
+        window spans at least the final sample (so a positive value
+        smaller than the sample period still yields a defined mean).
+        Must be ≥ 0; must not exceed ``times[-1] - times[0]``.
 
     Raises
     ------
     ValueError:
         On inconsistent inputs (non-monotonic ``times``, length
-        mismatch between any trace and ``times``, or a joint key
+        mismatch between any trace and ``times``, a joint key
         present in one of ``measured_positions`` / ``commanded_positions``
-        but missing from the other).
+        but missing from the other, or a ``settle_window_s`` that is
+        negative or larger than the trace span).
     """
     _validate_times(times)
     n = len(times)
+
+    if settle_window_s < 0.0:
+        raise ValueError(
+            f"r2_stage2_assertions: settle_window_s must be >= 0, got {settle_window_s}"
+        )
+    span = times[-1] - times[0]
+    if settle_window_s > span:
+        raise ValueError(
+            f"r2_stage2_assertions: settle_window_s={settle_window_s} exceeds "
+            f"trace span={span} (times[0]={times[0]}, times[-1]={times[-1]})"
+        )
+
+    # Index of the first sample inside the trailing settle window. When
+    # settle_window_s == 0.0 we leave settle_start = n (sentinel: use the
+    # last-sample path). When > 0, at minimum the final sample qualifies.
+    if settle_window_s > 0.0:
+        threshold = times[-1] - settle_window_s
+        settle_start = n - 1
+        while settle_start > 0 and times[settle_start - 1] >= threshold:
+            settle_start -= 1
+    else:
+        settle_start = n  # sentinel; branch below selects final-sample mode
 
     measured_keys = set(measured_positions)
     commanded_keys = set(commanded_positions)
@@ -276,8 +319,14 @@ def evaluate_all_joints_joint_space(
         metrics: Dict[str, float] = {}
         failures: list = []
 
-        # 1. Completion: final-sample error.
-        final_err = abs(q[-1] - q_cmd[-1])
+        # 1. Completion: trailing-window mean when settle_window_s > 0,
+        #    otherwise the single final-sample error.
+        if settle_start < n:
+            window_errs = [abs(q[i] - q_cmd[i]) for i in range(settle_start, n)]
+            final_err = sum(window_errs) / len(window_errs)
+            metrics["settle_window_samples"] = float(len(window_errs))
+        else:
+            final_err = abs(q[-1] - q_cmd[-1])
         metrics["final_err_rad"] = final_err
         if final_err > completion_tol_rad:
             failures.append(f"final_err_rad={final_err:.6g} > tol={completion_tol_rad:.6g}")
