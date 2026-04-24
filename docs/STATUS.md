@@ -1,6 +1,6 @@
 # Status
 
-_Last updated: 2026-04-25 (**thirteenth consecutive blocker-only STATUS
+_Last updated: 2026-04-25 (**fourteenth consecutive blocker-only STATUS
 iteration — no code change**). M6.0 remains the sole blocking gate and
 no operator input has arrived in the interval. Per AGENTS.md §3 step 7
 / §7 the agent commits only this STATUS refresh and stops. Unit tests
@@ -10,7 +10,7 @@ docs-only edit — green. The prior full-gate run (unit 1522 + colcon
 remains the current green baseline; nothing runtime-facing changed so
 integration tests were not re-run._
 
-_Note: this is now the thirteenth consecutive no-progress iteration.
+_Note: this is now the fourteenth consecutive no-progress iteration.
 Per AGENTS.md §8, the outer loop's no-progress guard counts
 consecutive iterations with **no commit**; these STATUS-only commits
 technically satisfy the guard but the operator should be aware that
@@ -44,7 +44,7 @@ iterations is **complete for the gated R2/R3 orchestrator**; remaining
 open seams are all either deferred-by-design or gated on M6.0 (see
 "Pre-bake chain status" below).
 
-This is the thirteenth consecutive iteration with this same
+This is the fourteenth consecutive iteration with this same
 conclusion; no operator input has been received in the interval. Per
 AGENTS.md §3 step 7, the agent commits only this STATUS update and
 stops.
@@ -140,7 +140,7 @@ Unblocked ordering:
 
 Active for **M6** (please resolve in order):
 
-- **[M6.0 gate — still active, 13th iteration]** Decide how to vendor
+- **[M6.0 gate — still active, 14th iteration]** Decide how to vendor
   the `mujoco_ros2_control` patch required for claim-aware ctrl
   routing. ADR-0012 §Decisions-to-gate lists three options;
   recommendation is **(a) submodule under
