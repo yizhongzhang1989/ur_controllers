@@ -76,6 +76,12 @@ TCP_TOLERANCE_KEYS = {
     "tcp_steady_drift_mm_per_30s",
 }
 
+STAGE2_TOLERANCE_KEYS = {
+    "completion_tol_rad",
+    "peak_tracking_err_rad",
+    "saturation_hold_ms",
+}
+
 INERTIA_KEYS = ("ixx", "iyy", "izz", "ixy", "ixz", "iyz")
 
 
@@ -149,6 +155,13 @@ def _check_arm(doc: dict, arm_name: str) -> None:
     for k, v in tcp.items():
         assert isinstance(v, (int, float)) and v > 0.0, (k, v)
 
+    stage2 = doc["stage2"]
+    assert isinstance(stage2, dict), stage2
+    assert set(stage2.keys()) == STAGE2_TOLERANCE_KEYS, set(stage2.keys())
+    for k, v in stage2.items():
+        assert isinstance(v, (int, float)) and not isinstance(v, bool), (k, v)
+        assert v > 0.0, (k, v)
+
 
 def test_ur5e_schema(ur5e: dict) -> None:
     _check_arm(ur5e, "ur5e")
@@ -165,6 +178,13 @@ def test_both_arms_share_controller_set(ur5e: dict, ur15: dict) -> None:
 
 def test_both_arms_share_tcp_tolerance_keys(ur5e: dict, ur15: dict) -> None:
     assert set(ur5e["tcp"]["tolerances"].keys()) == set(ur15["tcp"]["tolerances"].keys())
+
+
+def test_both_arms_share_stage2_values(ur5e: dict, ur15: dict) -> None:
+    # ROADMAP R2 requires identical pass/fail criteria across arms;
+    # pin full block equality, not just the key set, so a per-arm
+    # tweak has to be explicit (via an ADR).
+    assert ur5e["stage2"] == ur15["stage2"]
 
 
 # ---------------------------------------------------------------------------

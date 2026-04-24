@@ -1,11 +1,8 @@
 # Status
 
-_Last updated: 2026-04-24 (R2 stage-2 assertion harness +
-19 unit tests landed; joint-space branch of the M6.13 all-joints
-test — per-joint completion, peak tracking, and torque-saturation-
-hold — reusing the stage-1 longest-contiguous-ms helper. FK /
-cartesian-mode branch deferred to the M6.14 pre-bake. M6.0 operator
-gate still active for every bullet that requires live sim changes)._
+_Last updated: 2026-04-24 (stage-2 tolerance block landed in the R2
+expectation YAMLs + loader + schema tests. M6.0 operator gate still
+active for every bullet that requires live sim changes)._
 
 ## Current milestone
 
@@ -33,11 +30,16 @@ Still gated on **M6.0** (vendoring strategy for
    a target `ur_robot_driver` version and payload plumbing.
 
 With M6.15's schema live plus the loader, theoretical helpers,
-measured-signal helpers, the stage-1 assertion harness, and now the
-stage-2 joint-space harness all pre-baked, M6.12 (R2 stage-1) and the
-joint-space path of M6.13 (R2 stage-2) can both be authored end-to-end
-as sim-collection orchestrators — they just can't run until M6.5
-ships. Still missing on the pre-bake chain:
+measured-signal helpers, the stage-1 assertion harness, the stage-2
+joint-space harness, and now the per-arm stage-2 tolerance block
+wired through the loader, M6.12 (R2 stage-1) and the joint-space
+path of M6.13 (R2 stage-2) can both be authored end-to-end as
+sim-collection orchestrators — they just can't run until M6.5 ships.
+When that orchestrator lands it should include a terminal settle
+window before sampling `|q(t_end) - q_cmd(t_end)|` for the
+`completion_tol_rad` check (the tolerance is tighter than
+`peak_tracking_err_rad` on purpose). Still missing on the pre-bake
+chain:
 
 1. M6.13 cartesian-mode / FK-based kinematic-consistency branch
    (needs a UR FK module; source and licensing to be agreed).
@@ -47,67 +49,41 @@ ships. Still missing on the pre-bake chain:
 
 ## Last completed tasks
 
-- **This iteration: R2 stage-2 assertion harness (joint-space).**
-  New `tests/integration/r2_stage2_assertions.py` adds
-  `evaluate_all_joints_joint_space()` returning a `Stage2Result`
-  with per-joint `JointStage2Metrics`. For every joint it checks
-  **motion completion** (`|q(t_end) - q_cmd(t_end)|`
-  ≤ `completion_tol_rad`), **peak tracking error**
-  (`max_t |q(t) - q_cmd(t)|` ≤ `peak_tracking_err_rad`) — the
-  joint-space branch of R2 stage-2 kinematic consistency — and,
-  optionally, **torque-saturation hold** (longest contiguous
-  `|tau| ≥ effort_limit_nm` window ≤ `saturation_hold_ms`,
-  default 100 ms per R2 text). Reuses `_longest_contiguous_ms`
-  from `r2_stage1_assertions.py` via the same importlib sibling
-  pattern so the helper is not duplicated. The FK-based
-  cartesian-mode branch of R2 stage-2 (5 mm + 2° TCP tolerance)
-  is deferred: lands alongside the M6.14 FK pre-bake once the
-  kinematics source is agreed. Pinned by 19 unit tests in
-  `tests/unit/test_r2_stage2_assertions.py` covering the happy
-  path, single- and multi-joint failures, saturation pass/fail
-  paths, skip-when-limit-missing, six input-validation guards,
-  the result dataclasses' `.ok` / `.failures` / `.format()`
-  surface, `__all__` exports, frozen dataclass invariants, and
-  the stage-1 sibling-module reuse. Tolerance values for stage-2
-  are currently passed as kwargs — a stage-2 block in
-  `tests/integration/expectations/<arm>.yaml` is the natural
-  follow-up once the numeric review from ADR-0013 progresses.
-- **Prior iteration: R2 stage-1 assertion harness.**
-  `tests/integration/r2_stage1_assertions.py` exposes three
-  evaluators — one per response model in the expectation YAML —
-  that take a `ControllerExpectation` + measured `/joint_states`
-  traces and return a `Stage1Result` (metrics + failure strings
-  + `.ok` + `.format()`):
-  - `evaluate_position_mode` (JTC / forward_position /
-    forward_velocity): steady-state error, trailing-window drift,
-    FFT limit-cycle on velocity. dB ↔ linear conversion handled
-    internally so the YAML keeps the R2-native
-    `fft_peak_db_above_noise_floor` key.
-  - `evaluate_open_loop_effort` (forward_effort): runaway bound
-    and an optional torque-trace saturation-hold check using a
-    generic "longest-contiguous run in a bool mask, in ms" helper.
-  - `evaluate_second_order` (crisp / simple joint impedance):
-    peak error, trailing velocity RMS chatter, and damping-ratio-
-    vs-theory — theoretical ζ computed from `K`, `D`, and the
-    joint's `effective_inertia_kg_m2` via
-    `expectations_loader.second_order_response`; overdamped
-    theory (ζ ≥ 1) tolerates a `None` measurement (no oscillation
-    to fit), underdamped theory does not.
-  Pure stdlib; loads `signal_analysis` and `expectations_loader`
-  via importlib (sibling modules, `tests/integration/` isn't on
-  `sys.path` as a package). Pinned by 18 unit tests in
-  `tests/unit/test_r2_stage1_assertions.py` covering pass and fail
-  paths for each evaluator, the `Stage1Result` surface, trace-
-  length validation, and a missing-tolerance `KeyError` guard.
-  Together with the prior pre-bake modules this closes the last
-  authoring dependency for M6.12.
-- **Prior iteration: R2 signal-analysis helpers**
-  (`tests/integration/signal_analysis.py` + 19 unit tests).
+- **This iteration: R2 stage-2 tolerance block in the expectation
+  YAMLs.** Added a `stage2:` block with
+  `completion_tol_rad=0.05`, `peak_tracking_err_rad=0.15`,
+  `saturation_hold_ms=100.0` to both
+  `tests/integration/expectations/ur5e.yaml` and `ur15.yaml`
+  (identical values — the schema test now pins full block equality
+  between arms, not just matching key sets, so a per-arm tweak has
+  to be explicit). Values stay `draft: true` per ADR-0013;
+  `peak_tracking_err_rad` mirrors the stage-1 `bounded_err_rad`
+  bound and `saturation_hold_ms` mirrors the ROADMAP R2 100 ms
+  figure. Loader extended with a `Stage2Tolerances` frozen
+  dataclass whose field names match the kwargs of
+  `r2_stage2_assertions.evaluate_all_joints_joint_space`, exposed
+  as `ArmExpectation.stage2`; missing or partial `stage2` blocks
+  raise at load time (same strictness as the rest of the loader).
+  Pinned by +7 unit tests: stage-2 schema per-arm, cross-arm block
+  equality, loader happy-path per arm, identical-across-arms at
+  the loader layer, reject-missing-block, reject-partial-block,
+  reject-non-numeric. No change to `r2_stage2_assertions.py`
+  itself — its functional kwargs API stays untouched; the loader
+  gives test authors a typed source-of-truth for the numbers.
+- **Prior iteration: R2 stage-2 assertion harness (joint-space).**
+  `tests/integration/r2_stage2_assertions.py` +
+  `tests/unit/test_r2_stage2_assertions.py` (19 unit tests) —
+  per-joint motion-completion, peak-tracking, and torque-saturation-
+  hold evaluators; reuses the stage-1 `_longest_contiguous_ms`
+  helper via the sibling-module pattern.
+- **Prior iteration: R2 stage-1 assertion harness** pairs
+  expectations with measured signals for the three response models.
+- **Prior iteration: R2 signal-analysis helpers.**
 - **Prior iteration: R2 expectations loader** (+29 unit tests
   in `test_expectations_loader.py`).
 - **Prior iteration: M6.15 — R2 expectation schema + first-draft
   values** (`tests/integration/expectations/{ur5e, ur15,
-  payloads}.yaml` + 7 schema tests; ADR-0013).
+  payloads}.yaml` + schema tests; ADR-0013).
 - **Prior iteration: blocker-only STATUS refresh** (M6.0 gate).
 - **Prior iteration: propose M6 and ADR-0012** (docs-only, raised
   `mujoco_ros2_control` vendoring as an explicit operator gate).
@@ -132,17 +108,16 @@ ships. Still missing on the pre-bake chain:
 
 ## Test status
 
-- Unit tests: `scripts/run_tests.sh --unit-only` — **264 passed**
-  (up from 245; +19 from `test_r2_stage2_assertions.py`).
+- Unit tests: `scripts/run_tests.sh --unit-only` — **271 passed**
+  (up from 264; +7 tests pinning the stage-2 block).
 - Integration tests (pre-M6): still expected green —
   **22** `test_math` gtests + **5** `crisp_controllers` gtests +
   **12** integration tests (sim smoke + 3 crisp roles +
   simple_joint_impedance + cartesian_motion, each × {ur5e,
-  ur15}). Not re-run this iteration: only YAML + one unit test
-  changed; nothing the integration suite depends on moved.
-- `pre-commit run --files <new files>`: clean (trim trailing
-  whitespace, EOL fixer, check-yaml, ruff, ruff-format —
-  clang-format not applicable).
+  ur15}). Not re-run this iteration: only YAML + loader + unit
+  tests changed; nothing the integration suite depends on moved.
+- `pre-commit run --files <changed>`: clean (trim trailing
+  whitespace, EOL fixer, check-yaml, ruff, ruff-format).
 
 ## Blockers / open questions for operator
 
@@ -160,8 +135,9 @@ Active for **M6** (please resolve in order):
   `robot_driver:={sim,real}` launch-arg design (M6.11).
 - **[M6 R2 — partial]** Tolerance values in
   `tests/integration/expectations/*.yaml` now exist as
-  first-principles **drafts** per ADR-0013. The schema is
-  frozen; numerical review is the open action. Operator is
+  first-principles **drafts** per ADR-0013, including the new
+  `stage2` block added this iteration. The schema is frozen;
+  numerical review is the open action. Operator is
   expected to edit values in place (`draft: true` flag clears
   when all values are confirmed). Per-joint
   `effective_inertia_kg_m2` values are the most fragile;

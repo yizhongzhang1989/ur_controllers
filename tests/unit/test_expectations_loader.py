@@ -226,8 +226,64 @@ def _good_arm_doc(arm: str) -> dict:
                 "tolerances": ctrl_tol,
             },
         },
+        "stage2": {
+            "completion_tol_rad": 0.05,
+            "peak_tracking_err_rad": 0.15,
+            "saturation_hold_ms": 100.0,
+        },
         "tcp": {"tolerances": tcp_tol},
     }
+
+
+@pytest.mark.parametrize("arm", ["ur5e", "ur15"])
+def test_load_arm_stage2(arm):
+    doc = EL.load_arm(arm)
+    s2 = doc.stage2
+    assert isinstance(s2, EL.Stage2Tolerances)
+    assert s2.completion_tol_rad > 0.0
+    assert s2.peak_tracking_err_rad > 0.0
+    assert s2.saturation_hold_ms > 0.0
+    # Match the kwargs of evaluate_all_joints_joint_space so an R2
+    # stage-2 test author can splat these straight in.
+    assert set(s2.__dataclass_fields__.keys()) == {
+        "completion_tol_rad",
+        "peak_tracking_err_rad",
+        "saturation_hold_ms",
+    }
+
+
+def test_load_arm_stage2_identical_across_arms():
+    # ROADMAP R2 requires arm-agnostic pass/fail criteria. Pin this
+    # at the loader layer too so a per-arm value drift fails the unit
+    # gate as soon as someone edits only one YAML.
+    s2_ur5e = EL.load_arm("ur5e").stage2
+    s2_ur15 = EL.load_arm("ur15").stage2
+    assert s2_ur5e == s2_ur15
+
+
+def test_load_arm_rejects_missing_stage2(tmp_path):
+    doc = _good_arm_doc("ur5e")
+    del doc["stage2"]
+    _write_arm_doc(tmp_path, "ur5e", doc)
+    with pytest.raises(ValueError, match="stage2"):
+        EL.load_arm("ur5e", expect_dir=tmp_path)
+
+
+def test_load_arm_rejects_partial_stage2(tmp_path):
+    # The more likely drift: key present but one field omitted.
+    doc = _good_arm_doc("ur5e")
+    del doc["stage2"]["saturation_hold_ms"]
+    _write_arm_doc(tmp_path, "ur5e", doc)
+    with pytest.raises(ValueError, match="missing required keys"):
+        EL.load_arm("ur5e", expect_dir=tmp_path)
+
+
+def test_load_arm_rejects_non_numeric_stage2(tmp_path):
+    doc = _good_arm_doc("ur5e")
+    doc["stage2"]["completion_tol_rad"] = "nope"
+    _write_arm_doc(tmp_path, "ur5e", doc)
+    with pytest.raises(ValueError, match="expected number"):
+        EL.load_arm("ur5e", expect_dir=tmp_path)
 
 
 def test_load_arm_rejects_arm_field_mismatch(tmp_path):

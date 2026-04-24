@@ -111,6 +111,28 @@ controllers:
       chatter_velocity_rms_rad_s: 0.05
       damping_ratio_pct: 20.0
 
+# R2 stage-2 (all-joints-together) tolerances.
+#
+# Consumed as kwargs by
+# `tests/integration/r2_stage2_assertions.evaluate_all_joints_joint_space`
+# via the expectations_loader's `ArmExpectation.stage2` accessor. The
+# values below are first-principles drafts matching the ROADMAP R2 text:
+#   * saturation_hold_ms mirrors the 100 ms figure in ROADMAP §M6.R2
+#     ("no joint saturates torque for more than 100 ms contiguously").
+#   * peak_tracking_err_rad mirrors the stage-1 `bounded_err_rad` bound
+#     so the joint-space kinematic-consistency check stays consistent
+#     with single-joint regulation tolerance.
+#   * completion_tol_rad is set tighter than peak_tracking_err_rad
+#     because the orchestrator must include a terminal settle window
+#     when measuring `|q(t_end) - q_cmd(t_end)|`; this is captured in
+#     STATUS as a follow-up for the stage-2 orchestrator.
+# Both arms share identical stage-2 tolerances (the schema test pins
+# block equality between ur5e and ur15).
+stage2:
+  completion_tol_rad: 0.05
+  peak_tracking_err_rad: 0.15
+  saturation_hold_ms: 100.0
+
 # TCP-level tolerances used by the R2 stage-3 (end-effector) tests.
 # Mirrors R2 text in ROADMAP.md §M6.R2.
 tcp:

@@ -88,11 +88,27 @@ class ControllerExpectation:
 
 
 @dataclass(frozen=True)
+class Stage2Tolerances:
+    """R2 stage-2 (all-joints-together) joint-space tolerances.
+
+    Matches the kwargs of
+    ``r2_stage2_assertions.evaluate_all_joints_joint_space``. Keeps the
+    pre-baked assertion module decoupled from the YAML while giving
+    test authors one typed source-of-truth for the numbers.
+    """
+
+    completion_tol_rad: float
+    peak_tracking_err_rad: float
+    saturation_hold_ms: float
+
+
+@dataclass(frozen=True)
 class ArmExpectation:
     arm: str
     draft: bool
     joints: Tuple[JointExpectation, ...]
     controllers: Mapping[str, ControllerExpectation]
+    stage2: Stage2Tolerances
     tcp_tolerances: Mapping[str, float]
 
     def joint(self, name: str) -> JointExpectation:
@@ -206,6 +222,25 @@ def load_arm(arm: str, expect_dir: Path = EXPECT_DIR) -> ArmExpectation:
             tolerances=tol,
         )
 
+    stage2_raw = doc.get("stage2")
+    if not isinstance(stage2_raw, dict):
+        raise ValueError(f"{arm}.yaml: missing required 'stage2' mapping")
+    stage2_keys = ("completion_tol_rad", "peak_tracking_err_rad", "saturation_hold_ms")
+    missing = [k for k in stage2_keys if k not in stage2_raw]
+    if missing:
+        raise ValueError(f"{arm}.yaml: stage2 missing required keys {missing}")
+    stage2 = Stage2Tolerances(
+        completion_tol_rad=_as_float(
+            stage2_raw["completion_tol_rad"], f"{arm}:stage2.completion_tol_rad"
+        ),
+        peak_tracking_err_rad=_as_float(
+            stage2_raw["peak_tracking_err_rad"], f"{arm}:stage2.peak_tracking_err_rad"
+        ),
+        saturation_hold_ms=_as_float(
+            stage2_raw["saturation_hold_ms"], f"{arm}:stage2.saturation_hold_ms"
+        ),
+    )
+
     tcp_raw = doc["tcp"]["tolerances"]
     tcp_tol = {k: _as_float(v, f"{arm}:tcp.tolerances.{k}") for k, v in tcp_raw.items()}
 
@@ -214,6 +249,7 @@ def load_arm(arm: str, expect_dir: Path = EXPECT_DIR) -> ArmExpectation:
         draft=bool(doc.get("draft", False)),
         joints=joints,
         controllers=controllers,
+        stage2=stage2,
         tcp_tolerances=tcp_tol,
     )
 
@@ -313,6 +349,7 @@ __all__: Sequence[str] = (
     "Payload",
     "PayloadCatalog",
     "REPO_ROOT",
+    "Stage2Tolerances",
     "SUPPORTED_ARMS",
     "damping_ratio_within_band",
     "load_arm",
