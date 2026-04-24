@@ -539,6 +539,7 @@ def test_module_all_exports():
         "JointStage2Metrics",
         "Stage2Result",
         "evaluate_all_joints_joint_space",
+        "evaluate_all_joints_from_expectation",
     }
 
 
@@ -579,3 +580,219 @@ def test_reuses_stage1_longest_contiguous_helper():
     assert sibling is not None
     # Same symbol (same Python callable) as the public one.
     assert sibling._longest_contiguous_ms is not None
+
+
+# ---------------------------------------------------------------------------
+# evaluate_all_joints_from_expectation — ArmExpectation-driven wrapper
+# ---------------------------------------------------------------------------
+
+
+class _FakeJoint:
+    def __init__(self, name: str, effort_limit_nm: float) -> None:
+        self.name = name
+        self.effort_limit_nm = effort_limit_nm
+
+
+class _FakeStage2:
+    def __init__(
+        self,
+        completion_tol_rad: float,
+        peak_tracking_err_rad: float,
+        saturation_hold_ms: float,
+    ) -> None:
+        self.completion_tol_rad = completion_tol_rad
+        self.peak_tracking_err_rad = peak_tracking_err_rad
+        self.saturation_hold_ms = saturation_hold_ms
+
+
+class _FakeArm:
+    def __init__(self, stage2: _FakeStage2, joints: tuple) -> None:
+        self.stage2 = stage2
+        self.joints = joints
+
+
+def _fake_arm(
+    completion: float = 0.05,
+    peak: float = 0.15,
+    hold_ms: float = 100.0,
+    effort: float = 150.0,
+) -> _FakeArm:
+    return _FakeArm(
+        stage2=_FakeStage2(completion, peak, hold_ms),
+        joints=tuple(_FakeJoint(j, effort) for j in JOINTS),
+    )
+
+
+def test_from_expectation_happy_path_matches_explicit_kwargs():
+    ts, measured, commanded = _identical_traces()
+    arm = _fake_arm(completion=1e-6, peak=1e-6, hold_ms=100.0)
+
+    wrapped = r2s2.evaluate_all_joints_from_expectation(
+        arm,
+        "joint_trajectory_controller",
+        times=ts,
+        measured_positions=measured,
+        commanded_positions=commanded,
+    )
+    direct = r2s2.evaluate_all_joints_joint_space(
+        controller="joint_trajectory_controller",
+        times=ts,
+        measured_positions=measured,
+        commanded_positions=commanded,
+        completion_tol_rad=1e-6,
+        peak_tracking_err_rad=1e-6,
+        saturation_hold_ms=100.0,
+        effort_limits_nm={j: 150.0 for j in JOINTS},
+    )
+    assert wrapped.ok
+    assert wrapped.controller == direct.controller
+    assert len(wrapped.per_joint) == len(direct.per_joint)
+    for w, d in zip(wrapped.per_joint, direct.per_joint):
+        assert w.joint == d.joint
+        assert w.failures == d.failures
+        assert dict(w.metrics) == dict(d.metrics)
+
+
+def test_from_expectation_pulls_completion_tolerance_from_stage2():
+    ts, measured, commanded = _identical_traces()
+    measured["elbow_joint"][-1] += 0.05
+    arm = _fake_arm(completion=0.01, peak=0.10)
+
+    result = r2s2.evaluate_all_joints_from_expectation(
+        arm,
+        "simple_joint_impedance",
+        times=ts,
+        measured_positions=measured,
+        commanded_positions=commanded,
+    )
+    assert not result.ok
+    assert len(result.failures) == 1
+    assert result.failures[0].startswith("elbow_joint: final_err_rad=")
+
+
+def test_from_expectation_pulls_peak_tolerance_from_stage2():
+    ts, measured, commanded = _identical_traces()
+    measured["wrist_1_joint"][50] += 0.2
+    arm = _fake_arm(completion=0.01, peak=0.05)
+
+    result = r2s2.evaluate_all_joints_from_expectation(
+        arm,
+        "crisp_joint_impedance",
+        times=ts,
+        measured_positions=measured,
+        commanded_positions=commanded,
+    )
+    assert not result.ok
+    assert len(result.failures) == 1
+    assert result.failures[0].startswith("wrist_1_joint: peak_tracking_err_rad=")
+
+
+def test_from_expectation_uses_per_joint_effort_limits_and_hold_ms():
+    ts, measured, commanded = _identical_traces()
+    n = len(ts)
+    # Sustained saturation on elbow_joint for 200 ms (0.2 s = 20 samples
+    # at dt=0.01). Hold tol set to 100 ms in the arm — should trip.
+    tau = [0.0] * n
+    for i in range(40, 61):
+        tau[i] = 200.0  # above 150 Nm limit
+
+    arm = _fake_arm(completion=1e-6, peak=1e-6, hold_ms=100.0, effort=150.0)
+
+    result = r2s2.evaluate_all_joints_from_expectation(
+        arm,
+        "forward_effort_controller",
+        times=ts,
+        measured_positions=measured,
+        commanded_positions=commanded,
+        torques={"elbow_joint": tau},
+    )
+    assert not result.ok
+    elbow = next(j for j in result.per_joint if j.joint == "elbow_joint")
+    assert "longest_saturation_hold_ms" in elbow.metrics
+    assert elbow.metrics["longest_saturation_hold_ms"] > 100.0
+    assert any("longest_saturation_hold_ms" in f for f in elbow.failures)
+    # Other joints: no torque supplied → no saturation metric reported.
+    for j in result.per_joint:
+        if j.joint == "elbow_joint":
+            continue
+        assert "longest_saturation_hold_ms" not in j.metrics
+
+
+def test_from_expectation_passes_settle_window_through():
+    ts, measured, commanded = _identical_traces()
+    n = len(ts)
+    # Persistent trailing error on shoulder_pan of 0.03 rad over last
+    # 0.2 s (20 samples); single-sample final error is also 0.03.
+    for i in range(n - 20, n):
+        measured["shoulder_pan_joint"][i] += 0.03
+
+    arm = _fake_arm(completion=0.02, peak=0.10)
+
+    # Without settle window: final-sample path flags it.
+    no_window = r2s2.evaluate_all_joints_from_expectation(
+        arm,
+        "simple_joint_impedance",
+        times=ts,
+        measured_positions=measured,
+        commanded_positions=commanded,
+    )
+    pan = next(j for j in no_window.per_joint if j.joint == "shoulder_pan_joint")
+    assert pan.metrics["final_err_rad"] == pytest.approx(0.03, abs=1e-12)
+    assert "settle_window_samples" not in pan.metrics
+
+    # With settle window: still flagged (persistent trailing error), but
+    # diagnostic metric surfaces, proving the kwarg is forwarded.
+    with_window = r2s2.evaluate_all_joints_from_expectation(
+        arm,
+        "simple_joint_impedance",
+        times=ts,
+        measured_positions=measured,
+        commanded_positions=commanded,
+        settle_window_s=0.15,
+    )
+    pan2 = next(j for j in with_window.per_joint if j.joint == "shoulder_pan_joint")
+    assert "settle_window_samples" in pan2.metrics
+    assert pan2.metrics["settle_window_samples"] >= 15.0
+
+
+def test_from_expectation_rejects_unknown_torque_joint():
+    ts, measured, commanded = _identical_traces()
+    arm = _fake_arm()
+    with pytest.raises(ValueError, match="torques contains joints not in arm_expectation"):
+        r2s2.evaluate_all_joints_from_expectation(
+            arm,
+            "forward_effort_controller",
+            times=ts,
+            measured_positions=measured,
+            commanded_positions=commanded,
+            torques={"not_a_real_joint": [0.0] * len(ts)},
+        )
+
+
+def test_from_expectation_integrates_with_real_loader():
+    """Smoke-test against the real ArmExpectation dataclass from the
+    loader: exercises the duck-typed field access with the genuine
+    production shape, so a future schema drift in the loader surfaces
+    here rather than only in integration."""
+    import importlib.util as _iu
+
+    loader_path = REPO_ROOT / "tests" / "integration" / "expectations_loader.py"
+    spec = _iu.spec_from_file_location("_expectations_loader_for_stage2", loader_path)
+    assert spec and spec.loader
+    loader = _iu.module_from_spec(spec)
+    sys.modules["_expectations_loader_for_stage2"] = loader
+    spec.loader.exec_module(loader)
+
+    arm = loader.load_arm("ur5e")
+    ts, measured, commanded = _identical_traces()
+
+    # Identical traces should pass even with the real (draft) tolerances,
+    # since they are all ≥ 0.
+    result = r2s2.evaluate_all_joints_from_expectation(
+        arm,
+        "joint_trajectory_controller",
+        times=ts,
+        measured_positions=measured,
+        commanded_positions=commanded,
+    )
+    assert result.ok, result.format()

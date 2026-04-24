@@ -1,9 +1,9 @@
 # Status
 
-_Last updated: 2026-04-24 (stage-2 evaluator gains an optional terminal
-settle window — `completion_tol_rad` now samples a trailing mean when
-`settle_window_s > 0`. M6.0 operator gate still active for every bullet
-that requires live sim changes)._
+_Last updated: 2026-04-24 (stage-2 evaluator gets an ArmExpectation-driven
+convenience wrapper — `evaluate_all_joints_from_expectation` collapses
+orchestrator boilerplate. M6.0 operator gate still active for every
+bullet that requires live sim changes)._
 
 ## Current milestone
 
@@ -32,18 +32,20 @@ Still gated on **M6.0** (vendoring strategy for
 
 With M6.15's schema live plus the loader, theoretical helpers,
 measured-signal helpers, stage-1 assertion harness, stage-2
-joint-space harness (now with settle-window support), per-arm
-stage-2 tolerance block wired through the loader, M6.12 (R2
-stage-1) and the joint-space path of M6.13 (R2 stage-2) can both
-be authored end-to-end as sim-collection orchestrators — they
-just can't run until M6.5 ships. The orchestrator should pass
-its probe's settle-window length (from the scenario definition)
-directly as `settle_window_s` into
-`evaluate_all_joints_joint_space`; the evaluator averages
-`|q(t) - q_cmd(t)|` over the trailing window and uses that mean
-as `final_err_rad`, so a tighter `completion_tol_rad` than
-`peak_tracking_err_rad` is meaningful. Still missing on the
-pre-bake chain:
+joint-space harness (settle-window support + the new
+`evaluate_all_joints_from_expectation` wrapper that pulls
+`stage2` tolerances and per-joint `effort_limit_nm` straight
+from an `ArmExpectation`), per-arm stage-2 tolerance block wired
+through the loader, M6.12 (R2 stage-1) and the joint-space path
+of M6.13 (R2 stage-2) can both be authored end-to-end as
+sim-collection orchestrators — they just can't run until M6.5
+ships. The orchestrator should pass its probe's settle-window
+length (from the scenario definition) directly as
+`settle_window_s` into
+`evaluate_all_joints_from_expectation`; one call per controller
+handles the tolerances + effort limits and returns a
+`Stage2Result` with full per-joint diagnostics. Still missing on
+the pre-bake chain:
 
 1. M6.13 cartesian-mode / FK-based kinematic-consistency branch
    (needs a UR FK module; source and licensing to be agreed).
@@ -53,28 +55,37 @@ pre-bake chain:
 
 ## Last completed tasks
 
-- **This iteration: stage-2 evaluator terminal settle window.**
-  Extended `tests/integration/r2_stage2_assertions.py`
-  `evaluate_all_joints_joint_space` with a `settle_window_s: float
-  = 0.0` kwarg. When positive, the motion-completion check
-  averages `|q(t) - q_cmd(t)|` over every sample whose timestamp
-  is within `settle_window_s` of `times[-1]` (at minimum the
-  final sample) and reports the mean as `final_err_rad`; a
-  `settle_window_samples` diagnostic metric is exposed so
-  orchestrator artefacts can log the effective window size on
-  non-uniform sampling. Default `0.0` preserves existing
-  single-sample behaviour — the seven pre-existing stage-2 tests
-  pass unchanged. Validates `settle_window_s >= 0` and
-  `settle_window_s <= times[-1] - times[0]` at entry; both raise
-  `ValueError` with the same strictness as the rest of the
-  harness. Pinned by +7 unit tests in
-  `tests/unit/test_r2_stage2_assertions.py` covering: default =
-  final-sample behaviour, trailing-mean damps a final-sample
-  spike, persistent trailing error survives the mean, window
-  smaller than `dt` degenerates to the single final sample,
-  negative window rejected, over-span window rejected,
-  window == span covers every sample. Unit gate now reports
-  **278 passed** (up from 271).
+- **This iteration: stage-2 evaluator ArmExpectation wrapper.**
+  Added `evaluate_all_joints_from_expectation(arm, controller,
+  ...)` to `tests/integration/r2_stage2_assertions.py`. The
+  wrapper forwards to `evaluate_all_joints_joint_space` after
+  sourcing `completion_tol_rad` / `peak_tracking_err_rad` /
+  `saturation_hold_ms` from `arm.stage2` and
+  `effort_limits_nm = {j.name: j.effort_limit_nm for j in
+  arm.joints}`. Duck-typed on the input (any object exposing
+  those attributes works, matching the stage-1 convention of
+  accepting a `ControllerExpectation` object directly). Guards
+  against silent drops by raising `ValueError` when `torques`
+  contains joint keys not present in the arm. Added to
+  `__all__`. Pinned by +7 unit tests in
+  `tests/unit/test_r2_stage2_assertions.py`: happy path byte-
+  matches the explicit-kwargs call, stage-2 `completion_tol_rad`
+  propagates, stage-2 `peak_tracking_err_rad` propagates, per-
+  joint `effort_limit_nm` feeds the saturation-hold check,
+  `settle_window_s` is forwarded through, unknown torque joints
+  reject, and a smoke test exercises the wrapper against the real
+  `expectations_loader.ArmExpectation` dataclass (so a future
+  schema drift in the loader surfaces here before integration).
+  Unit gate now reports **285 passed** (up from 278). Full
+  `scripts/run_tests.sh` green end-to-end: unit (285) +
+  colcon test (10 packages, 22 `test_math` + 5 `test_filters`
+  gtests) + integration (12 launch tests across sim_smoke, three
+  crisp roles, simple_jimp, cartesian_motion, each × {ur5e,
+  ur15}), total ~5 min.
+- **Prior iteration: stage-2 evaluator terminal settle window.**
+  `evaluate_all_joints_joint_space` accepts `settle_window_s`;
+  when positive the motion-completion check averages
+  `|q(t) - q_cmd(t)|` over the trailing window.
 - **Prior iteration: R2 stage-2 tolerance block in the expectation
   YAMLs.** Added `stage2:` block with `completion_tol_rad=0.05`,
   `peak_tracking_err_rad=0.15`, `saturation_hold_ms=100.0` to
@@ -118,14 +129,13 @@ pre-bake chain:
 
 ## Test status
 
-- Unit tests: `scripts/run_tests.sh --unit-only` — **278 passed**
-  (up from 271; +7 tests pinning the settle-window kwarg).
-- Integration tests (pre-M6): still expected green —
-  **22** `test_math` gtests + **5** `crisp_controllers` gtests +
-  **12** integration tests (sim smoke + 3 crisp roles +
-  simple_joint_impedance + cartesian_motion, each × {ur5e,
-  ur15}). Not re-run this iteration: only the unit-gated stage-2
-  module changed; nothing the integration suite depends on moved.
+- Unit tests: `scripts/run_tests.sh --unit-only` — **285 passed**
+  (up from 278; +7 tests pinning the new wrapper).
+- Integration tests: re-run this iteration — all **12** launch
+  tests green (sim smoke + 3 crisp roles + simple_joint_impedance
+  + cartesian_motion, each × {ur5e, ur15}); ~4:53 wall clock.
+- `colcon test`: **10** packages pass (22 `test_math` gtests +
+  5 `crisp_controllers` gtests).
 - `pre-commit run --files <changed>`: clean (trim trailing
   whitespace, EOL fixer, ruff, ruff-format).
 
@@ -145,15 +155,14 @@ Active for **M6** (please resolve in order):
   `robot_driver:={sim,real}` launch-arg design (M6.11).
 - **[M6 R2 — partial]** Tolerance values in
   `tests/integration/expectations/*.yaml` now exist as
-  first-principles **drafts** per ADR-0013, including the new
-  `stage2` block added this iteration. The schema is frozen;
-  numerical review is the open action. Operator is
-  expected to edit values in place (`draft: true` flag clears
-  when all values are confirmed). Per-joint
-  `effective_inertia_kg_m2` values are the most fragile;
-  they will be regenerated from the MJCF `armature` + H(q) at
-  home pose during M6.1 and should be treated as placeholders
-  until then.
+  first-principles **drafts** per ADR-0013, including the
+  `stage2` block. The schema is frozen; numerical review is the
+  open action. Operator is expected to edit values in place
+  (`draft: true` flag clears when all values are confirmed).
+  Per-joint `effective_inertia_kg_m2` values are the most
+  fragile; they will be regenerated from the MJCF `armature` +
+  H(q) at home pose during M6.1 and should be treated as
+  placeholders until then.
 - **[M6 R3 — pending]** Three design knobs to confirm before
   M6.17:
   1. MJCF-reload vs. in-place body mutation for payload

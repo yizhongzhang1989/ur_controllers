@@ -62,7 +62,10 @@ import importlib.util
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Mapping, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Dict, Mapping, Optional, Sequence, Tuple
+
+if TYPE_CHECKING:
+    from . import expectations_loader  # noqa: F401 — annotation-only import
 
 # ---------------------------------------------------------------------------
 # Sibling loading (tests/integration/ is not a package; follow the
@@ -94,6 +97,7 @@ __all__ = (
     "JointStage2Metrics",
     "Stage2Result",
     "evaluate_all_joints_joint_space",
+    "evaluate_all_joints_from_expectation",
 )
 
 
@@ -361,3 +365,88 @@ def evaluate_all_joints_joint_space(
         )
 
     return Stage2Result(controller=controller, per_joint=tuple(per_joint))
+
+
+# ---------------------------------------------------------------------------
+# Expectation-driven convenience wrapper
+# ---------------------------------------------------------------------------
+
+
+def evaluate_all_joints_from_expectation(
+    arm_expectation: "expectations_loader.ArmExpectation",
+    controller: str,
+    *,
+    times: Sequence[float],
+    measured_positions: Mapping[str, Sequence[float]],
+    commanded_positions: Mapping[str, Sequence[float]],
+    torques: Optional[Mapping[str, Sequence[float]]] = None,
+    settle_window_s: float = 0.0,
+) -> Stage2Result:
+    """Run :func:`evaluate_all_joints_joint_space` sourcing tolerances
+    from a typed :class:`expectations_loader.ArmExpectation`.
+
+    Convenience wrapper so stage-2 orchestrators do not open-code the
+    ``stage2`` tolerance unpacking + per-joint effort-limit assembly
+    on every call. Mirrors the stage-1 convention where evaluators
+    accept the loader's dataclass directly and ``.tol()`` it.
+
+    Sourced from ``arm_expectation``:
+
+    * ``stage2.completion_tol_rad`` → ``completion_tol_rad`` kwarg.
+    * ``stage2.peak_tracking_err_rad`` → ``peak_tracking_err_rad`` kwarg.
+    * ``stage2.saturation_hold_ms`` → ``saturation_hold_ms`` kwarg.
+    * ``{j.name: j.effort_limit_nm for j in arm_expectation.joints}`` →
+      ``effort_limits_nm`` kwarg. Always populated, but only consulted
+      for joints whose key also appears in ``torques``.
+
+    Parameters
+    ----------
+    arm_expectation:
+        Typed arm-level expectation as returned by
+        :func:`expectations_loader.load_arm`. Duck-typed; any object
+        exposing ``stage2`` (with the three tolerance fields) and an
+        iterable ``joints`` of items with ``.name`` and
+        ``.effort_limit_nm`` works.
+    controller:
+        Controller name, echoed in the result.
+    times, measured_positions, commanded_positions, torques,
+    settle_window_s:
+        Forwarded unchanged to :func:`evaluate_all_joints_joint_space`.
+        ``settle_window_s`` defaults to ``0.0`` (single-sample
+        completion), matching the underlying evaluator.
+
+    Raises
+    ------
+    ValueError:
+        If ``torques`` is supplied with a key that is not a joint of
+        ``arm_expectation`` — the wrapper would otherwise silently drop
+        the saturation-hold check for that joint. All ``ValueError``
+        cases from :func:`evaluate_all_joints_joint_space` still
+        propagate unchanged.
+    """
+    stage2 = arm_expectation.stage2
+    effort_limits_nm: Dict[str, float] = {
+        j.name: float(j.effort_limit_nm) for j in arm_expectation.joints
+    }
+
+    if torques is not None:
+        unknown = sorted(set(torques) - set(effort_limits_nm))
+        if unknown:
+            raise ValueError(
+                "r2_stage2_assertions: torques contains joints not in "
+                f"arm_expectation: {unknown}; "
+                f"known joints: {sorted(effort_limits_nm)}"
+            )
+
+    return evaluate_all_joints_joint_space(
+        controller,
+        times=times,
+        measured_positions=measured_positions,
+        commanded_positions=commanded_positions,
+        completion_tol_rad=float(stage2.completion_tol_rad),
+        peak_tracking_err_rad=float(stage2.peak_tracking_err_rad),
+        torques=torques,
+        effort_limits_nm=effort_limits_nm,
+        saturation_hold_ms=float(stage2.saturation_hold_ms),
+        settle_window_s=settle_window_s,
+    )
