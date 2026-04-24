@@ -1,30 +1,26 @@
 # Status
 
-_Last updated: 2026-04-24 (R3 MJCF payload splicer landed as
-`tests/integration/r3_payload_splice.py` + 44 unit tests — pre-bakes
-the document-level seam of M6.17 that consumes the prior iteration's
-body-snippet emitter. Pure-stdlib
-`splice_payload_into_mjcf(mjcf, payload, *,
-attach_body="tool0", body_name="ee_payload") -> str` parses the
-input MJCF with `xml.etree.ElementTree`, locates the anchor body
-anywhere in the tree (`.//body[@name='tool0']`), and appends the
-emitter's `<body>` snippet as its last child. Honours the
-ROADMAP-R3 "zero-mass case = no body injected" rule as a hard
-byte-identity invariant (zero-mass path returns the input string
-without even parsing it — so the `no_payload` baseline passes
-unchanged even if the MJCF is malformed, and the R3 "compare
-`mj_fullM` before/after" golden reference is trivial for that
-level). Rejects: non-str `mjcf`, malformed XML (positive-mass
-path only), non-str / empty / whitespace `attach_body` or
-`body_name`, missing anchor, ambiguous anchor (two bodies sharing
-the same `name`), and a double-splice guard that fires if
-`body_name` is already present anywhere in the tree (sibling or
-under the anchor — caller must regenerate rather than re-splice).
-Validator errors from `payload_validation.validate_payload`
-propagate unchanged via the emitter. Interop-tested against all
-three in-tree catalog payloads (`no_payload`, `small_payload`,
-`large_payload`). M6.0 operator gate still active for every
-bullet that requires live sim changes.)._
+_Last updated: 2026-04-24 (R3 test-parametrisation helper landed as
+`tests/integration/r3_payload_parametrize.py` + 40 unit tests —
+pre-bakes the `{arm} × {payload}` matrix consumed by M6.19. Pure
+stdlib; exports `arm_payload_combinations(arms=None,
+payload_names=None) -> Tuple[Tuple[str, str], ...]` and
+`arm_payload_ids(combinations) -> Tuple[str, ...]`. Defaults draw
+from `expectations_loader.SUPPORTED_ARMS` × the ordered
+`load_payloads()` catalog; caller-supplied subsets are respected
+in their given order (outer: arms, inner: payloads — so a human
+reading pytest output walks each arm through the payload ladder
+together). Ids are `"<arm>-<payload>"`, shaped to drop
+straight into `pytest.mark.parametrize(..., ids=...)` next to the
+`argvalues` tuple without an adaptor. Validates unknown arm /
+payload, duplicates, non-str entries, wrong container, empty
+selection; for ids additionally validates 2-tuple shape, non-empty
+str components, and rejects `-` in either component (reserved as
+the id separator, prevents round-trip ambiguity). No adjustment
+of expectation values here — payload-adjusted expectations are a
+separate seam that needs per-joint kinematics data the YAMLs do
+not yet carry. M6.0 operator gate still active for every bullet
+that requires live sim changes.)._
 
 ## Current milestone
 
@@ -92,7 +88,42 @@ Still missing on the pre-bake chain:
 
 ## Last completed tasks
 
-- **This iteration: R3 MJCF payload splicer (pre-bakes M6.17
+- **This iteration: R3 test-parametrisation helper (pre-bakes the
+  M6.19 `{arm} × {payload}` matrix).** Added
+  `tests/integration/r3_payload_parametrize.py` exporting
+  `arm_payload_combinations(arms=None, payload_names=None, *,
+  expect_dir=None) -> Tuple[Tuple[str, str], ...]` and
+  `arm_payload_ids(combinations) -> Tuple[str, ...]`. Defaults
+  enumerate the full ROADMAP matrix: outer =
+  `expectations_loader.SUPPORTED_ARMS`, inner = catalog-ordered
+  `load_payloads()`. Caller-supplied subsets are respected in
+  their given order so pytest output walks each arm through its
+  payload ladder together. Ids are shaped `"<arm>-<payload>"`
+  (e.g. `"ur5e-no_payload"`), intended to be passed directly as
+  `pytest.mark.parametrize(..., ids=...)` alongside the combo
+  tuple without an adaptor. `ValueError` on: unknown arm or
+  payload, duplicates, non-str entries, wrong container type,
+  empty selection; id-builder additionally validates 2-tuple
+  shape, non-empty str components, and rejects `-` in either
+  component (reserved as the id separator, prevents round-trip
+  ambiguity). Pure stdlib — no numpy, no ROS, no pytest import at
+  module level so the helper is reusable from non-test tooling.
+  Does **not** compute payload-adjusted expectation values; that
+  is a separate seam that needs per-joint kinematics data the
+  YAMLs do not yet carry, deliberately split off so this helper
+  does not speculate on physics. Pinned by 40 unit tests in
+  `tests/unit/test_r3_payload_parametrize.py`: export surface,
+  default product shape / cardinality / ordering, caller-supplied
+  arm / payload subsets (both dimensions, both list and tuple
+  inputs, single-element subsets), id parallelism with combos,
+  id order preservation, and the full rejection matrix for
+  both functions. Unit gate now reports **680 passed** (up from
+  640). Full `scripts/run_tests.sh` green end-to-end: unit (680)
+  + colcon test (10 packages, 22 `test_math` + 5 `test_filters`
+  + 4 `test_pseudo_inverse` gtests) + integration (12 launch
+  tests × {ur5e, ur15}), ~4:46 wall clock for the integration
+  slice.
+- **Prior iteration: R3 MJCF payload splicer (pre-bakes M6.17
   document-level seam).** Added
   `tests/integration/r3_payload_splice.py` exporting
   `splice_payload_into_mjcf(mjcf, payload, *,
@@ -528,11 +559,11 @@ Still missing on the pre-bake chain:
 
 ## Test status
 
-- Unit tests: `scripts/run_tests.sh --unit-only` — **640 passed**
-  (up from 596; +44 MJCF splicer tests).
+- Unit tests: `scripts/run_tests.sh --unit-only` — **680 passed**
+  (up from 640; +40 R3 parametrisation tests).
 - Integration tests: re-run this iteration — all **12** launch
   tests green (sim smoke + 3 crisp roles + simple_joint_impedance
-  + cartesian_motion, each × {ur5e, ur15}); ~4:50 wall clock.
+  + cartesian_motion, each × {ur5e, ur15}); ~4:46 wall clock.
 - `colcon test`: **10** packages pass (22 `test_math` gtests +
   4 `test_pseudo_inverse` + 5 `test_filters` gtests from
   `crisp_controllers`).
