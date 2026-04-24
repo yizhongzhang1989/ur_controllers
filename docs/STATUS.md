@@ -1,8 +1,8 @@
 # Status
 
-_Last updated: 2026-04-24 (M6.15 schema + draft expectations landed;
-M6.0 operator gate still active for every bullet that requires live
-sim changes)._
+_Last updated: 2026-04-24 (R2 expectations loader + 29 unit tests
+landed; pre-bakes the consumer API for M6.12–M6.14. M6.0 operator
+gate still active for every bullet that requires live sim changes)._
 
 ## Current milestone
 
@@ -29,25 +29,33 @@ Still gated on **M6.0** (vendoring strategy for
 7. M6.10 / M6.11 / M6.16–M6.19 can interleave once M6.0 gives us
    a target `ur_robot_driver` version and payload plumbing.
 
-With M6.15's schema live, M6.12–M6.14 (R2 tests) can be drafted
-against the expectation vocabulary *before* the sim bullets land —
-they just can't run until M6.5 ships.
+With M6.15's schema live and the loader + helpers now pre-baked,
+M6.12–M6.14 (R2 tests) can be drafted against the expectation
+vocabulary *before* the sim bullets land — they just can't run
+until M6.5 ships.
 
 ## Last completed tasks
 
-- **This iteration: M6.15 — R2 expectation schema + first-draft
-  values.** New `tests/integration/expectations/{ur5e, ur15,
-  payloads}.yaml` plus `tests/unit/test_expectations_schema.py`
-  (7 tests). ADR-0013 pins the "schema frozen, values draft"
-  contract and the cross-reference to `ur_sim_config/config/
-  ur_types/<arm>.yaml` so effort-limit drift fails at unit-test
-  time. Addresses STATUS open-question "[M6 R2 — new] confirm
-  tolerance values"; operator now has a concrete draft to edit
-  in place without churning the test layer. Not a substitute
-  for M6.0 — just the largest independent M6 bullet that doesn't
-  require the plugin patch.
-- **Prior iteration: blocker-only STATUS refresh** (second
-  consecutive iteration on M6.0).
+- **This iteration: R2 expectations loader.** New
+  `tests/integration/expectations_loader.py` exposes typed
+  dataclasses (`ArmExpectation`, `ControllerExpectation`,
+  `JointExpectation`, `PayloadCatalog`) plus
+  `second_order_response(K, D, J)` and
+  `damping_ratio_within_band()` helpers used by R2 stage-1.
+  Lookup helpers raise `KeyError`/`ValueError` on drift instead
+  of returning `None`, and the loader rejects
+  `bool`-as-number (YAML's `true`/`false` are `int` subclasses
+  in Python). Pinned by 29 unit tests in
+  `tests/unit/test_expectations_loader.py` (happy path on both
+  arms, payload iteration, numeric sanity for the second-order
+  formulas, damping-ratio band math, and five schema-drift guards
+  that write doctored YAML into `tmp_path`). Pre-bakes the
+  consumer API so M6.12–M6.14 (R2 tests) can be authored the
+  moment M6.0 is resolved.
+- **Prior iteration: M6.15 — R2 expectation schema + first-draft
+  values** (`tests/integration/expectations/{ur5e, ur15,
+  payloads}.yaml` + 7 schema tests; ADR-0013).
+- **Prior iteration: blocker-only STATUS refresh** (M6.0 gate).
 - **Prior iteration: propose M6 and ADR-0012** (docs-only, raised
   `mujoco_ros2_control` vendoring as an explicit operator gate).
 - **M0 bullet `scripts/setup_env.sh`** (three-stage apt → rosdep
@@ -71,8 +79,8 @@ they just can't run until M6.5 ships.
 
 ## Test status
 
-- Unit tests: `scripts/run_tests.sh --unit-only` — **179 passed**
-  (up from 172; +7 from `test_expectations_schema.py`).
+- Unit tests: `scripts/run_tests.sh --unit-only` — **208 passed**
+  (up from 179; +29 from `test_expectations_loader.py`).
 - Integration tests (pre-M6): still expected green —
   **22** `test_math` gtests + **5** `crisp_controllers` gtests +
   **12** integration tests (sim smoke + 3 crisp roles +
