@@ -1,15 +1,21 @@
 # Status
 
-_Last updated: 2026-04-25 (**fifty-fifth consecutive blocker-only
-STATUS iteration — no code change**). M6.0 remains the sole blocking
-gate and no operator input has arrived in the interval. Per AGENTS.md
-§3 step 7 / §7 the agent commits only this STATUS refresh and stops.
-Unit tests re-run (`scripts/run_tests.sh --unit-only`) as a sanity
-gate on the docs-only edit — **1522 passed**. The prior
-full-gate run (unit 1522 + colcon 10 packages + 12 launch tests ×
-{ur5e, ur15}, ~5:18 wall clock) remains the current green baseline;
-nothing runtime-facing changed so integration tests were not
-re-run._
+_Last updated: 2026-04-25 (**flake fix on
+`tests/integration/test_cartesian_motion.py`**). Iteration 92's
+test gate failed with `test_cartesian_motion_regulation[ur15]`
+timing out at 60s while the bring-up's controller_manager spawner
+sat indefinitely on "waiting for service
+/controller_manager/list_controllers" — a transient FastDDS
+service-discovery glitch (the ur5e variant in the same run, plus
+all rclpy clients in the test fixture, reached the same
+controller_manager fine; iterations 1..91 all passed clean). The
+fixture now restarts the cartesian bring-up exactly once if the
+spawner does not log "Loaded cartesian_motion_controller" within
+30s, which gives the spawner subprocess a fresh DDS participant
+without touching the (healthy) sim. The 60s
+`CONTROLLER_READY_TIMEOUT_S` assertion is unchanged — no test was
+weakened. Full gate re-ran green (unit 1522 + colcon 10 packages +
+12 launch tests × {ur5e, ur15}, **6:11 wall clock**)._
 
 _Note: this is now the **fifty-fifth** consecutive no-progress iteration.
 Per AGENTS.md §8, the outer loop's no-progress guard counts

@@ -63,6 +63,12 @@ DISPLACED_CONTROLLER = "joint_trajectory_controller"
 # controller_base's on_configure.
 SIM_READY_TIMEOUT_S = 120
 CONTROLLER_READY_TIMEOUT_S = 60
+# How long to wait for the bring-up's controller_manager spawner to
+# progress past "waiting for service /controller_manager/list_controllers"
+# before we treat the bring-up as DDS-stuck and restart it once. Healthy
+# bring-up loads the controller in ~3s on both arms; we give a generous
+# budget here. See the in-fixture retry block for rationale.
+BRINGUP_LOADED_TIMEOUT_S = 30
 # Max |q - q_target| allowed (rad) during regulation hold. Matches the
 # crisp and simple_jimp tests so M5 can compare apples-to-apples.
 REGULATION_TOLERANCE_RAD = 0.15
@@ -288,7 +294,31 @@ def cartesian_motion_up(request):
                 f"robot:={robot}"
             ),
         ]
+
+        def _bringup_loaded() -> bool:
+            # Spawner prints "Loaded cartesian_motion_controller" once it
+            # has successfully talked to /controller_manager. If that
+            # marker is absent after BRINGUP_LOADED_TIMEOUT_S the spawner
+            # is almost certainly stuck on a transient DDS service-
+            # discovery glitch (we have observed it sit on "waiting for
+            # service /controller_manager/list_controllers" indefinitely
+            # despite the sim's controller_manager being fully up and
+            # responsive to other rclpy clients in the same DDS domain).
+            try:
+                text = bringup_log.read_text(errors="ignore")
+            except FileNotFoundError:
+                return False
+            return "Loaded cartesian_motion_controller" in text
+
         bringup_proc = _spawn_in_pgid(bringup_argv, bringup_log)
+        if not _wait_until(_bringup_loaded, BRINGUP_LOADED_TIMEOUT_S, interval=1.0):
+            # Restart bring-up exactly once. Do NOT touch the sim — it is
+            # healthy (sim_ready already passed) and recreating it would
+            # mask real regressions in the bring-up path. The fresh
+            # subprocess gets a clean DDS participant and almost always
+            # picks up the controller_manager immediately.
+            _kill_pg(bringup_proc)
+            bringup_proc = _spawn_in_pgid(bringup_argv, bringup_log)
 
         yield robot, sim_proc, bringup_proc, sim_log, bringup_log
     finally:
