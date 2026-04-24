@@ -1,6 +1,83 @@
 # Status
 
-_Last updated: 2026-04-24 (R2 **run-directory helper** landed as
+_Last updated: 2026-04-24 (R2 **artefact discovery helper** landed as
+`tests/integration/r2_find_artefacts.py` + 39 unit tests — closes the
+"M5 comparison driver can glob for R2 artefacts" seam the
+`r2_run_artefact` writer docstring pins (module docstring, line ~25:
+"Keeping the name derived pins a single shape across stages so the M5
+comparison driver can glob for R2 artefacts without a schema-file
+lookup"). Exposes one narrow function
+`find_r2_artefacts(run_dir, *, stage=None, arm=None, controller=None,
+payload=None) -> tuple[R2ArtefactLocator, ...]` plus a companion
+`parse_artefact_filename(filename) -> R2ArtefactLocator` that inverts
+`r2_run_artefact.artefact_filename`. `R2ArtefactLocator` is a frozen
+dataclass with five fields: `path: Path`, `stage: int`, `arm: str`,
+`controller: str`, `payload: str`. Non-recursive: direct children of
+`run_dir` only (the writer always writes at the top level). Files that
+don't match the `r2_stage*.yaml` glob are silently skipped (a run dir
+may contain caller-supplied logs or scratch); files that half-match
+(start with `r2_stage`, end with `.yaml`, but fail to parse) raise
+`ValueError` with a path-specific locator rather than being dropped —
+a half-matching name is almost always a writer/reader seam bug.
+Filename parsing is anchored on the known `SUPPORTED_ARMS` prefix and
+`PAYLOAD_LEVELS` suffix so controller names that themselves contain
+`_` (e.g. `crisp_joint_impedance`, `crisp_cartesian_impedance`) parse
+unambiguously. Non-canonical stage shapes (`+1` / `-1` / leading-zero)
+are rejected so the writer's emitted form is the sole round-trippable
+shape. Optional filter kwargs let a caller pull a single
+`{stage, arm, controller, payload}` combination in one call — the
+writer emits one file per combination so this matches the natural
+test-body access pattern. Strict validation mirrors the rest of the
+R2 pre-bake chain: non-Path `run_dir` → `TypeError`, missing
+`run_dir` → `FileNotFoundError`, file-instead-of-dir `run_dir` →
+`NotADirectoryError`, out-of-range `stage` filter → `ValueError`,
+`bool` `stage` filter → `TypeError` (bool is an int subclass; reject
+explicitly), non-`int` stage filter → `TypeError`, non-member
+`arm`/`payload` filters → `ValueError`, non-str filters →
+`TypeError`, empty-string `controller` filter → `ValueError`. Pure
+stdlib; no PyYAML / numpy / ROS imports. Sibling `expectations_loader`
+and `r2_run_artefact` are loaded via `importlib` file paths, matching
+the convention used by the other `r2_stage*_theoretical` modules (see
+the "module loading" repo memory) so this module works both under
+the unit-test gate's direct load and when imported as part of the
+`tests.integration` package. Pinned by 39 unit tests in
+`tests/unit/test_r2_find_artefacts.py`: export surface (`__all__`,
+`FILENAME_PREFIX == "r2_stage"`, `FILENAME_SUFFIX == ".yaml"`, frozen
+dataclass); `parse_artefact_filename` happy-path matrix as a
+full-Cartesian-product round-trip against
+`r2_run_artefact.artefact_filename` (3 stages × 2 arms × 3 payloads
+× 7 representative controller names = 126 combos, each asserting all
+four primary keys + path echo); parse-side validation (non-str,
+missing `.yaml`, missing `r2_stage` prefix, empty body, missing
+stage/arm separator, non-integer / unsupported / non-canonical stage,
+unknown arm, missing controller/payload-after-arm, unknown payload,
+empty controller span via double-underscore, no-separator vs.
+payload-suffix edge); `find_r2_artefacts` validation (non-Path
+run_dir, missing run_dir → `FileNotFoundError`, file-as-run_dir →
+`NotADirectoryError`, bad/bool/non-int stage filter, bad/non-str arm
+filter, bad/non-str payload filter, non-str/empty controller filter);
+discovery semantics (empty dir returns `()`, non-matching files
+skipped, sorted-by-path ordering, non-recursive, half-matching
+malformed name raises, directory-with-artefact-name raises); filter
+matrix against a 25-file populated run dir (filter-by-stage,
+filter-by-arm, filter-by-payload, filter-by-controller pulls the
+single stage-3 crisp_cartesian_impedance entry, all-four-filters
+pulls exactly one combo, no-match returns `()`); and an end-to-end
+round-trip that writes via `r2_run_artefact.write_r2_artefact` then
+reads back via `find_r2_artefacts`, asserting all four keys echo and
+the returned `path` is joined against `run_dir`. Unit gate now
+reports **1248 passed** (up from 1079). Full `scripts/run_tests.sh`
+green end-to-end: unit (1248) + colcon test (10 packages, 22
+`test_math` + 5 `test_filters` + 4 `test_pseudo_inverse` gtests) +
+integration (12 launch tests × {ur5e, ur15}, 299.74s). With this
+helper in place, future R2 aggregation / reporting (analogous to
+M5's `compare.py` report driver but over R2 artefacts) reduces to:
+`for loc in find_r2_artefacts(run_dir, **filters):
+doc = yaml.safe_load(loc.path.read_text()); ...`. M6.0 operator
+gate remains active for every bullet that requires live sim
+changes._
+
+_Previous iteration: R2 **run-directory helper** landed as
 `tests/integration/r2_run_dir.py` + 47 unit tests — closes the
 "caller decides run_dir" seam the `r2_run_artefact` writer docstring
 explicitly defers to: "the M5 compare driver already picks a UTC
@@ -561,20 +638,21 @@ can import `trajectory_msgs` at test-run time.
 
 Still missing on the pre-bake chain:
 
-1. ~~R2 run-directory helper~~ — **landed this iteration** as
-   `r2_run_dir.py` (see top-of-file summary). R2 stage test bodies
-   now pick a canonical
-   `<repo>/evaluation/runs/r2__<UTC-ts>[__<suffix>]/` run directory
-   in one call that is byte-compatible with M5's
-   `find_latest_run_dir` lexicographic sort.
-2. ~~R2 stage-3 cartesian gain resolver~~ — landed previous iteration
-   as `r2_stage3_cartesian_gains.py`. Future stage-3
-   `crisp_cartesian_impedance` test bodies now resolve per-axis
-   Cartesian task stiffnesses in one call.
-3. The concrete FK **and** IK backends themselves — both adapters
+1. ~~R2 run-directory helper~~ — landed previous iteration as
+   `r2_run_dir.py`.
+2. ~~R2 stage-3 cartesian gain resolver~~ — landed as
+   `r2_stage3_cartesian_gains.py`.
+3. ~~R2 artefact discovery helper~~ — **landed this iteration** as
+   `r2_find_artefacts.py` (see top-of-file summary). Future R2
+   aggregation / reporting drivers now glob a run directory with a
+   single call: `find_r2_artefacts(run_dir, **filters)` yields
+   sorted `R2ArtefactLocator(path, stage, arm, controller, payload)`
+   records, with filename parsing guaranteed to round-trip the
+   `r2_run_artefact.artefact_filename` writer.
+4. The concrete FK **and** IK backends themselves — both adapters
    deliberately keep these out of tree so the source / licensing
    decision is independent of the orchestrator wiring.
-4. M6.19 payload parametrisation across R2 stages (needs M6.16–
+5. M6.19 payload parametrisation across R2 stages (needs M6.16–
    M6.18 to land first). The validator + MJCF emitter + MJCF
    splicer + stripper + EePayload message-shape builder landed so
    far are the preflight seams those bullets will plug into; the
@@ -582,11 +660,11 @@ Still missing on the pre-bake chain:
    the `ur_sim_msgs/EePayload` vs `geometry_msgs/Inertia +
    PoseStamped` decision (M6 R3 blocker #3) can still be made
    independently.
-5. A thin ROS-side `EePayloadMessage -> ur_sim_msgs/EePayload`
+6. A thin ROS-side `EePayloadMessage -> ur_sim_msgs/EePayload`
    materialiser — by design lives outside the pre-bake chain so
    it can import `ur_sim_msgs` (and decide whether to use
    `geometry_msgs/Inertia` instead) at test-run time.
-6. A cartesian stage-3 theoretical-response extension for
+7. A cartesian stage-3 theoretical-response extension for
    `cartesian_second_order` (would consume the stiffnesses this
    iteration's resolver returns). Deferred — stage-3 theoretical
    currently emits `tcp_trajectory_tracking` only, which suffices
@@ -596,7 +674,45 @@ Still missing on the pre-bake chain:
 
 ## Last completed tasks
 
-- **This iteration: R2 run-directory helper (closes the "caller
+- **This iteration: R2 artefact discovery helper (closes the "M5
+  comparison driver can glob for R2 artefacts without a schema-file
+  lookup" seam the `r2_run_artefact` writer docstring pins).** Added
+  `tests/integration/r2_find_artefacts.py` exporting one narrow
+  function `find_r2_artefacts(run_dir, *, stage=None, arm=None,
+  controller=None, payload=None) -> tuple[R2ArtefactLocator, ...]`
+  plus a companion `parse_artefact_filename(filename)` that inverts
+  `r2_run_artefact.artefact_filename`. `R2ArtefactLocator` is a
+  frozen dataclass with five fields: `path: Path`, `stage: int`,
+  `arm: str`, `controller: str`, `payload: str`. Non-recursive
+  (direct children only); files that don't match the
+  `r2_stage*.yaml` glob are silently skipped (a run dir may contain
+  caller-supplied logs or scratch); files that half-match (start
+  with `r2_stage`, end with `.yaml`, but fail to parse) raise
+  `ValueError` rather than being dropped — a half-matching name is
+  almost always a writer/reader seam bug. Filename parsing is
+  anchored on the known `SUPPORTED_ARMS` prefix and `PAYLOAD_LEVELS`
+  suffix so controller names that themselves contain `_` (e.g.
+  `crisp_joint_impedance`, `crisp_cartesian_impedance`) parse
+  unambiguously. Non-canonical stage shapes (`+1` / `-1` /
+  leading-zero) are rejected so the writer's emitted form is the
+  sole round-trippable shape. Pure stdlib; no PyYAML / numpy / ROS
+  imports. Sibling modules loaded via `importlib` file paths,
+  matching the `r2_stage*_theoretical` convention (see the "module
+  loading" repo memory). Pinned by 39 unit tests in
+  `tests/unit/test_r2_find_artefacts.py`: export surface, parse
+  happy-path as a 126-combo Cartesian-product round-trip against
+  `artefact_filename`, parse-side validation (12 cases), find-side
+  validation (13 cases), discovery semantics (empty dir, skipped
+  non-matches, sorted-by-path ordering, non-recursive, half-match
+  raises, artefact-named directory raises), filter matrix against a
+  25-file populated run dir (single-key filters, all-four
+  pulls-one-combo, no-match returns `()`), and an end-to-end
+  round-trip with the real `write_r2_artefact` writer. Unit gate
+  **1248 passed** (up from 1079). Full `scripts/run_tests.sh` green
+  end-to-end: unit (1248) + colcon test (10 packages) + integration
+  (12 launch tests × {ur5e, ur15}, 299.74s).
+
+- **Prior iteration: R2 run-directory helper (closes the "caller
   decides run_dir" seam the `r2_run_artefact` writer docstring
   explicitly defers to).** Added `tests/integration/r2_run_dir.py`
   exporting a single narrow function
