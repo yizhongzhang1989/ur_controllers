@@ -1,11 +1,12 @@
 # Status
 
-_Last updated: 2026-04-24 (stage-1 commanded-signal generators pre-baked
-as `tests/integration/r2_stage1_commands.py` + 35 unit tests — emits
-per-joint ±30° step and 0.5 Hz sine traces with the other five joints
-held at home, closing the last joint-space commanded-trajectory gap on
-the R2 stage-1 orchestrator critical path. M6.0 operator gate still
-active for every bullet that requires live sim changes.)._
+_Last updated: 2026-04-24 (stage-2 commanded-signal generator pre-baked
+as `tests/integration/r2_stage2_commands.py` + 24 unit tests — emits
+the all-joints home → via-pose → home parallel-array trace the stage-2
+assertion harness already consumes, closing the last commanded-side
+gap on the R2 stage-2 joint-space orchestrator critical path. M6.0
+operator gate still active for every bullet that requires live sim
+changes.)._
 
 ## Current milestone
 
@@ -38,17 +39,20 @@ joint-space harness (settle-window support + the
 `evaluate_all_joints_from_expectation` wrapper), per-arm stage-2
 tolerance block wired through the loader, the stage-3 TCP assertion
 harness, the stage-3 **commanded** TCP trajectory generators, the
-FK-injected adapter (`r2_tcp_from_joints.py`), and now the stage-1
-**commanded** joint-space generators (`r2_stage1_commands.py` —
-`JointCommandTrace` + `step_command` / `sine_command`: single active
-joint, others pinned at home, ±30°-step and 0.5 Hz-sine shapes per
-the ROADMAP R2 stage-1 text, scalar `target_rad` metadata for the
-stage-1 evaluators' scalar `target=` kwarg), M6.12 (R2 stage-1),
-the joint-space path of M6.13 (R2 stage-2), and the assertion side
-of M6.14 (R2 stage-3) can all be authored end-to-end as
-sim-collection orchestrators — they just can't run until M6.5 ships
-**and** the operator picks a concrete FK backend (KDL / Pinocchio /
-MJCF-derived) to plug into the adapter.
+FK-injected adapter (`r2_tcp_from_joints.py`), the stage-1
+**commanded** joint-space generators (`r2_stage1_commands.py`), and
+now the stage-2 **commanded** all-joints generator
+(`r2_stage2_commands.py` — `AllJointsCommandTrace` +
+`home_to_pose_to_home_command`: every joint interpolates
+independently with a cosine pulse `q_i(t) = home_i + (via_i - home_i)
+* 0.5 * (1 - cos(2π t/T))` so the trace starts/ends at home with
+zero velocity and passes through the operator-supplied cluttered
+pose at `t = T/2`), M6.12 (R2 stage-1), the joint-space path of
+M6.13 (R2 stage-2), and the assertion side of M6.14 (R2 stage-3)
+can all be authored end-to-end as sim-collection orchestrators —
+they just can't run until M6.5 ships **and** the operator picks a
+concrete FK backend (KDL / Pinocchio / MJCF-derived) to plug into
+the adapter.
 
 Still missing on the pre-bake chain:
 
@@ -60,7 +64,47 @@ Still missing on the pre-bake chain:
 
 ## Last completed tasks
 
-- **This iteration: R2 stage-1 commanded-signal generators
+- **This iteration: R2 stage-2 commanded-signal generator
+  (pre-bake for M6.13).** Added
+  `tests/integration/r2_stage2_commands.py` exporting
+  `AllJointsCommandTrace` (frozen dataclass: `joint_names`,
+  `times`, read-only `positions` mapping, `home_positions_rad`,
+  `via_pose_rad`) and `home_to_pose_to_home_command(...)`. Every
+  joint interpolates independently with a cosine pulse
+  `q_i(t) = home_i + (via_i - home_i) * 0.5 * (1 - cos(2π t/T))`,
+  giving `q_i(0) == q_i(T) == home_i`, `q_i(T/2) == via_i`, and
+  zero velocity at `t ∈ {0, T/2, T}` — any chatter in the
+  measured trace is then a controller artefact, not a commanded-
+  signal artefact. `times[0] == 0.0` and `times[-1] ==
+  duration_s` exactly, matching the sibling stage modules'
+  invariant. Validation raises `ValueError` on empty / duplicate
+  `joint_names`, `home_positions_rad` / `via_pose_rad` length
+  mismatch, non-finite home / via, non-positive / non-finite
+  `duration_s`, `dt_s` below `_MIN_DT_S = 1e-5`, `dt_s >
+  duration_s`, and any `duration_s / dt_s` that rounds to fewer
+  than 2 intervals (so the midpoint via sample always lands in
+  the trace). Positions mapping is wrapped in
+  `types.MappingProxyType` so callers can't mutate it. Pure
+  stdlib; no numpy, no ROS. Pinned by 24 unit tests in
+  `tests/unit/test_r2_stage2_commands.py`: export surface,
+  frozen-dataclass property, `__len__` / `duration_s`,
+  echo-of-home-and-via, exact time endpoints, q(0) = q(T) =
+  home, midpoint-sample == via, waveform matches the closed-form
+  expression to 1e-12, zero-motion joint stays constant while
+  other joints still move, finite-difference velocity at
+  endpoints below 5e-3, `MappingProxyType` read-only contract,
+  and the full validation matrix. An interop test feeds the
+  commanded trace in as both sides to
+  `r2_stage2_assertions.evaluate_all_joints_joint_space` and
+  asserts `result.ok` and `result.failures == ()`, so a future
+  orchestrator pairing the two modules is guaranteed to meet the
+  evaluator's input contract. Unit gate now reports **420
+  passed** (up from 396). Full `scripts/run_tests.sh` green
+  end-to-end: unit (420) + colcon test (10 packages, 22
+  `test_math` + 5 `test_filters` + 4 `test_pseudo_inverse`
+  gtests) + integration (12 launch tests × {ur5e, ur15}), ~5
+  min 30 s wall clock.
+- **Prior iteration: R2 stage-1 commanded-signal generators
   (pre-bake for M6.12).** Added
   `tests/integration/r2_stage1_commands.py` exporting
   `JointCommandTrace` (frozen dataclass: `joint_names`, `times`,
@@ -159,12 +203,12 @@ Still missing on the pre-bake chain:
 
 ## Test status
 
-- Unit tests: `scripts/run_tests.sh --unit-only` — **396 passed**
-  (up from 361; +35 tests pinning the stage-1 commanded-signal
-  generators).
+- Unit tests: `scripts/run_tests.sh --unit-only` — **420 passed**
+  (up from 396; +24 tests pinning the stage-2 commanded-signal
+  generator).
 - Integration tests: re-run this iteration — all **12** launch
   tests green (sim smoke + 3 crisp roles + simple_joint_impedance
-  + cartesian_motion, each × {ur5e, ur15}); ~4:45 wall clock.
+  + cartesian_motion, each × {ur5e, ur15}); ~5:20 wall clock.
 - `colcon test`: **10** packages pass (22 `test_math` gtests +
   4 `test_pseudo_inverse` + 5 `test_filters` gtests from
   `crisp_controllers`).
