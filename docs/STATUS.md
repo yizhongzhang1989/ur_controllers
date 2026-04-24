@@ -1,6 +1,60 @@
 # Status
 
-_Last updated: 2026-04-24 (R2 **stage-2 theoretical-block builder**
+_Last updated: 2026-04-24 (R2 **stage-3 theoretical-block builder**
+landed as `tests/integration/r2_stage3_theoretical.py` + 21 unit
+tests — closes the expectations-loader → `r2_result_to_artefact`
+seam for stage-3 and **completes the R2 theoretical-block pre-bake
+chain** (stage-1 + stage-2 joint-space + stage-2 cartesian + stage-3
+all emit `{response_model, tolerances}` blocks ready to hand straight
+to `result_to_artefact`). Exports a single narrow function
+`theoretical_for_stage3(arm_exp: ArmExpectation) -> dict` and a
+pinned `SUPPORTED_TOLERANCE_KEYS = ('tcp_rmse_mm', 'tcp_peak_err_mm',
+'tcp_orientation_peak_deg', 'tcp_steady_drift_mm_per_30s')`. Emits
+`response_model='tcp_trajectory_tracking'` (matching the ROADMAP R2
+§stage-3 semantics — "commanded TCP trajectory tracked within the
+four per-arm TCP tolerances") and pulls all four values via
+`arm_exp.tcp_tol(k)` so a missing key bubbles the loader's native
+`KeyError` with the `available: [...]` diagnostic intact rather than
+silently defaulting. Strict typing: non-`ArmExpectation` inputs
+(including `Stage2Tolerances`, `Stage2TcpTolerances`, a bare dict
+with the right fields, `None`, `int`, `str`) raise `ValueError` —
+silently accepting a plain dict would drop the "numbers came from an
+expectation YAML" guarantee. Pure stdlib; sibling `expectations_loader`
+resolved via the `sys.modules`-first importlib loader convention
+from `r2_stage1_theoretical.py` / `r2_stage2_theoretical.py`. Pinned
+by 21 unit tests in `tests/unit/test_r2_stage3_theoretical.py`:
+export surface (`__all__`, `SUPPORTED_TOLERANCE_KEYS` tuple exactly
+matching the schema test's `TCP_TOLERANCE_KEYS` set); happy path
+(value equality, plain-float leaf types, int→float coercion, custom
+values propagate, plain-dict output); argument rejection matrix
+(None / int / str / bare dict / `Stage2Tolerances` / `Stage2TcpTolerances`);
+missing-tolerance-key test proving the loader's `KeyError` bubbles
+unchanged; two round-trips through `result_to_artefact(stage=3, ...)`
++ `write_r2_artefact` + `yaml.safe_load` (with and without
+`TcpStage3Result.notes`, verifying the notes → `metadata['stage3_notes']`
+path); real-YAML integration matrix over `{ur5e, ur15}` × all four
+tolerances; and a cross-arm equality check that pins the schema-test
+invariant "both arms share identical TCP tolerance values" through
+the builder. Unit gate now reports **954 passed** (up from 933).
+Full `scripts/run_tests.sh` green end-to-end: unit (954) + colcon
+test (10 packages, 22 `test_math` + 5 `test_filters` + 4
+`test_pseudo_inverse` gtests) + integration (12 launch tests ×
+{ur5e, ur15}), ~4:57 wall clock for the integration slice (one
+flake on `test_crisp_gravity_compensation_hold_pose[ur15]`
+recovered on immediate retry — pre-existing sim-bringup race,
+unrelated to this pure-stdlib helper). With this helper in place,
+any future R2 stage-3 test body (M6.14 `cartesian_motion` or
+`JTC + ik_shim`) reduces to: `result = evaluate_tcp_trajectory_*(...)` →
+`theoretical = theoretical_for_stage3(arm_exp)` →
+`artefact = result_to_artefact(stage=3, ..., theoretical=theoretical, result=result)` →
+`write_r2_artefact(run_dir, artefact)`. The R2 theoretical-block
+pre-bake chain is now complete; the remaining sim-collection seams
+are the concrete FK/IK backends (deliberately kept out of tree) and
+the thin ROS-side `JointTrajectoryGoal → FollowJointTrajectory.Goal`
+materialiser which must stay outside the pre-bake chain so it can
+import `trajectory_msgs` at test-run time.)_
+
+_Previous iteration: R2 **stage-2 theoretical-block builder**
 landed as `tests/integration/r2_stage2_theoretical.py` + 28 unit
 tests — closes the expectations-loader → `r2_result_to_artefact`
 seam for stage-2 (both joint-space and cartesian paths). Exports
@@ -295,9 +349,10 @@ can import `trajectory_msgs` at test-run time.
 
 Still missing on the pre-bake chain:
 
-1. R2 stage-3 theoretical-block builder — mirrors the stage-1 /
-   stage-2 shape against `ArmExpectation.tcp_tolerances` (the
-   four TCP tolerances already pinned by the schema test).
+1. ~~R2 stage-3 theoretical-block builder~~ — **landed this iteration**
+   as `r2_stage3_theoretical.py` (see top-of-file summary). The R2
+   theoretical-block pre-bake chain is now complete across stages 1,
+   2 (both paths) and 3.
 2. The concrete FK **and** IK backends themselves — both adapters
    deliberately keep these out of tree so the source / licensing
    decision is independent of the orchestrator wiring.
@@ -316,7 +371,37 @@ Still missing on the pre-bake chain:
 
 ## Last completed tasks
 
-- **This iteration: R2 stage-2 theoretical-block builder (closes the
+- **This iteration: R2 stage-3 theoretical-block builder (closes the
+  expectations-loader → `r2_result_to_artefact` seam for stage-3 and
+  completes the R2 theoretical-block pre-bake chain across stages 1,
+  2 (both paths) and 3).** Added
+  `tests/integration/r2_stage3_theoretical.py` exporting a single
+  narrow function `theoretical_for_stage3(arm_exp)` plus a pinned
+  `SUPPORTED_TOLERANCE_KEYS` tuple (four TCP keys: `tcp_rmse_mm`,
+  `tcp_peak_err_mm`, `tcp_orientation_peak_deg`,
+  `tcp_steady_drift_mm_per_30s`). Emits
+  `{response_model='tcp_trajectory_tracking', tolerances={...}}`
+  sourcing all four values via `arm_exp.tcp_tol(k)` — missing keys
+  bubble the loader's native `KeyError` with `available: [...]`
+  intact. Strict typing on the input: non-`ArmExpectation` values
+  (including `Stage2Tolerances`, `Stage2TcpTolerances`, and a bare
+  dict with the right fields) raise `ValueError` — silently
+  accepting any of these would drop the "numbers came from an
+  expectation YAML" guarantee. Pure stdlib; sibling
+  `expectations_loader` resolved via the `sys.modules`-first
+  importlib loader from `r2_stage1_theoretical.py`. Pinned by 21
+  unit tests in `tests/unit/test_r2_stage3_theoretical.py` (export
+  surface + schema-set parity; happy path with plain-float /
+  plain-dict leaves and int→float coercion; custom-values matrix;
+  argument rejection matrix incl. cross-dataclass swaps;
+  missing-tolerance-key bubbling; two round-trips through
+  `result_to_artefact(stage=3, ...)` + `write_r2_artefact` +
+  `yaml.safe_load` with and without `TcpStage3Result.notes`;
+  real-YAML integration matrix over `{ur5e, ur15}`; cross-arm
+  equality pinning the schema invariant). Unit gate **954 passed**
+  (up from 933).
+
+- **Prior iteration: R2 stage-2 theoretical-block builder (closes the
   expectations-loader → `r2_result_to_artefact` seam for stage-2 on
   both joint-space and cartesian paths).** Added
   `tests/integration/r2_stage2_theoretical.py` exporting two narrow
