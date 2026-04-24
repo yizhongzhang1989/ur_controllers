@@ -1,9 +1,10 @@
 # Status
 
-_Last updated: 2026-04-24 (R2 stage-1 assertion harness + 18 unit
-tests landed; pairs `ControllerExpectation` tolerances with
-`signal_analysis` measurements into per-response-model evaluators so
-R2 stage-1 tests reduce to sim-collection + one call. M6.0 operator
+_Last updated: 2026-04-24 (R2 stage-2 assertion harness +
+19 unit tests landed; joint-space branch of the M6.13 all-joints
+test — per-joint completion, peak tracking, and torque-saturation-
+hold — reusing the stage-1 longest-contiguous-ms helper. FK /
+cartesian-mode branch deferred to the M6.14 pre-bake. M6.0 operator
 gate still active for every bullet that requires live sim changes)._
 
 ## Current milestone
@@ -32,17 +33,46 @@ Still gated on **M6.0** (vendoring strategy for
    a target `ur_robot_driver` version and payload plumbing.
 
 With M6.15's schema live plus the loader, theoretical helpers,
-measured-signal helpers, and now the stage-1 assertion harness all
-pre-baked, M6.12 (R2 stage-1) can be authored end-to-end as a sim-
-collection orchestrator on top of `evaluate_position_mode` /
-`evaluate_open_loop_effort` / `evaluate_second_order` *before* the
-sim bullets land — it just can't run until M6.5 ships. M6.13 /
-M6.14 remain to be designed against their own signal/expectation
-pairings (stage-2 all-joints FK check, stage-3 TCP trajectory).
+measured-signal helpers, the stage-1 assertion harness, and now the
+stage-2 joint-space harness all pre-baked, M6.12 (R2 stage-1) and the
+joint-space path of M6.13 (R2 stage-2) can both be authored end-to-end
+as sim-collection orchestrators — they just can't run until M6.5
+ships. Still missing on the pre-bake chain:
+
+1. M6.13 cartesian-mode / FK-based kinematic-consistency branch
+   (needs a UR FK module; source and licensing to be agreed).
+2. M6.14 (R2 stage-3, TCP trajectory): also blocked on FK.
+3. M6.19 payload parametrisation across R2 stages (needs M6.16–
+   M6.18 to land first).
 
 ## Last completed tasks
 
-- **This iteration: R2 stage-1 assertion harness.** New
+- **This iteration: R2 stage-2 assertion harness (joint-space).**
+  New `tests/integration/r2_stage2_assertions.py` adds
+  `evaluate_all_joints_joint_space()` returning a `Stage2Result`
+  with per-joint `JointStage2Metrics`. For every joint it checks
+  **motion completion** (`|q(t_end) - q_cmd(t_end)|`
+  ≤ `completion_tol_rad`), **peak tracking error**
+  (`max_t |q(t) - q_cmd(t)|` ≤ `peak_tracking_err_rad`) — the
+  joint-space branch of R2 stage-2 kinematic consistency — and,
+  optionally, **torque-saturation hold** (longest contiguous
+  `|tau| ≥ effort_limit_nm` window ≤ `saturation_hold_ms`,
+  default 100 ms per R2 text). Reuses `_longest_contiguous_ms`
+  from `r2_stage1_assertions.py` via the same importlib sibling
+  pattern so the helper is not duplicated. The FK-based
+  cartesian-mode branch of R2 stage-2 (5 mm + 2° TCP tolerance)
+  is deferred: lands alongside the M6.14 FK pre-bake once the
+  kinematics source is agreed. Pinned by 19 unit tests in
+  `tests/unit/test_r2_stage2_assertions.py` covering the happy
+  path, single- and multi-joint failures, saturation pass/fail
+  paths, skip-when-limit-missing, six input-validation guards,
+  the result dataclasses' `.ok` / `.failures` / `.format()`
+  surface, `__all__` exports, frozen dataclass invariants, and
+  the stage-1 sibling-module reuse. Tolerance values for stage-2
+  are currently passed as kwargs — a stage-2 block in
+  `tests/integration/expectations/<arm>.yaml` is the natural
+  follow-up once the numeric review from ADR-0013 progresses.
+- **Prior iteration: R2 stage-1 assertion harness.**
   `tests/integration/r2_stage1_assertions.py` exposes three
   evaluators — one per response model in the expectation YAML —
   that take a `ControllerExpectation` + measured `/joint_states`
@@ -69,8 +99,8 @@ pairings (stage-2 all-joints FK check, stage-3 TCP trajectory).
   `tests/unit/test_r2_stage1_assertions.py` covering pass and fail
   paths for each evaluator, the `Stage1Result` surface, trace-
   length validation, and a missing-tolerance `KeyError` guard.
-  Together with the three prior pre-bake modules this closes the
-  last authoring dependency for M6.12.
+  Together with the prior pre-bake modules this closes the last
+  authoring dependency for M6.12.
 - **Prior iteration: R2 signal-analysis helpers**
   (`tests/integration/signal_analysis.py` + 19 unit tests).
 - **Prior iteration: R2 expectations loader** (+29 unit tests
@@ -102,8 +132,8 @@ pairings (stage-2 all-joints FK check, stage-3 TCP trajectory).
 
 ## Test status
 
-- Unit tests: `scripts/run_tests.sh --unit-only` — **245 passed**
-  (up from 227; +18 from `test_r2_stage1_assertions.py`).
+- Unit tests: `scripts/run_tests.sh --unit-only` — **264 passed**
+  (up from 245; +19 from `test_r2_stage2_assertions.py`).
 - Integration tests (pre-M6): still expected green —
   **22** `test_math` gtests + **5** `crisp_controllers` gtests +
   **12** integration tests (sim smoke + 3 crisp roles +
