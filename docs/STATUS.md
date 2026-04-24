@@ -1,12 +1,12 @@
 # Status
 
-_Last updated: 2026-04-24 (stage-2 commanded-signal generator pre-baked
-as `tests/integration/r2_stage2_commands.py` + 24 unit tests — emits
-the all-joints home → via-pose → home parallel-array trace the stage-2
-assertion harness already consumes, closing the last commanded-side
-gap on the R2 stage-2 joint-space orchestrator critical path. M6.0
-operator gate still active for every bullet that requires live sim
-changes.)._
+_Last updated: 2026-04-24 (IK-injected adapter pre-baked as
+`tests/integration/r2_joints_from_tcp.py` + 30 unit tests — folds a
+commanded `TcpTrajectory` through an injected IK callable into a
+`JointCommandTrajectory` consumable by a JTC goal-builder, mirroring
+the FK adapter and closing the last pre-bake gap on the R2 stage-3
+`JTC + ik_shim` combo. M6.0 operator gate still active for every
+bullet that requires live sim changes.)._
 
 ## Current milestone
 
@@ -40,31 +40,80 @@ joint-space harness (settle-window support + the
 tolerance block wired through the loader, the stage-3 TCP assertion
 harness, the stage-3 **commanded** TCP trajectory generators, the
 FK-injected adapter (`r2_tcp_from_joints.py`), the stage-1
-**commanded** joint-space generators (`r2_stage1_commands.py`), and
-now the stage-2 **commanded** all-joints generator
-(`r2_stage2_commands.py` — `AllJointsCommandTrace` +
-`home_to_pose_to_home_command`: every joint interpolates
-independently with a cosine pulse `q_i(t) = home_i + (via_i - home_i)
-* 0.5 * (1 - cos(2π t/T))` so the trace starts/ends at home with
-zero velocity and passes through the operator-supplied cluttered
-pose at `t = T/2`), M6.12 (R2 stage-1), the joint-space path of
-M6.13 (R2 stage-2), and the assertion side of M6.14 (R2 stage-3)
-can all be authored end-to-end as sim-collection orchestrators —
-they just can't run until M6.5 ships **and** the operator picks a
-concrete FK backend (KDL / Pinocchio / MJCF-derived) to plug into
-the adapter.
+**commanded** joint-space generators (`r2_stage1_commands.py`), the
+stage-2 **commanded** all-joints generator (`r2_stage2_commands.py`),
+and now the IK-injected adapter (`r2_joints_from_tcp.py` —
+`joint_trajectory_from_tcp` folds a commanded `TcpTrajectory` through
+an injected `ik(pos, quat, q_seed) -> Sequence[float]` into a
+`JointCommandTrajectory` whose `positions` mapping is shape-compatible
+with `AllJointsCommandTrace.positions` so the same JTC goal-builder
+can consume either; seeds threaded from previous output for branch
+continuity; duck-type accepts anything TcpTrajectory-shaped so the
+two-module-identity trap doesn't bite orchestrators), M6.12 (R2
+stage-1), the joint-space path of M6.13 (R2 stage-2), and **both**
+paths of M6.14 (R2 stage-3 `cartesian_motion` via the direct TCP
+commanded generators **and** `JTC + ik_shim` via the new IK adapter)
+can all be authored end-to-end as sim-collection orchestrators — they
+just can't run until M6.5 ships **and** the operator picks concrete
+FK and IK backends (KDL / Pinocchio / MJCF-derived) to plug into the
+two adapters.
 
 Still missing on the pre-bake chain:
 
-1. The concrete FK backend itself — the adapter deliberately
-   keeps this out of tree so the source / licensing decision is
-   independent of the orchestrator wiring.
+1. The concrete FK **and** IK backends themselves — both adapters
+   deliberately keep these out of tree so the source / licensing
+   decision is independent of the orchestrator wiring.
 2. M6.19 payload parametrisation across R2 stages (needs M6.16–
    M6.18 to land first).
 
 ## Last completed tasks
 
-- **This iteration: R2 stage-2 commanded-signal generator
+- **This iteration: IK-injected adapter (pre-bake for M6.14 `JTC +
+  ik_shim` combo).** Added `tests/integration/r2_joints_from_tcp.py`
+  exporting `IkCallable`, `JointCommandTrajectory` (frozen dataclass:
+  `joint_names`, `times`, read-only `MappingProxyType` `positions`,
+  `__len__` and `duration_s` property — shape-compatible with stage-2's
+  `AllJointsCommandTrace.positions` so a JTC goal-builder consumes
+  either without branching), and `joint_trajectory_from_tcp(trajectory,
+  ik, *, joint_names, q_seed)`. Injected IK contract:
+  `ik(pos_xyz_m, quat_xyzw, q_seed) -> Sequence[float]` of exactly
+  `len(joint_names)` finite floats — caller-supplied `q_seed` is used
+  for the first sample only; every subsequent call is seeded with the
+  previous solution so branch continuity only needs a good initial
+  guess. `times` forwarded verbatim from the input `TcpTrajectory`
+  (inherits its `times[0] == 0.0` and strict-monotonic invariants for
+  free). Trajectory input accepted by **duck-type** (`times` +
+  `positions` + `orientations` attributes) rather than `isinstance`,
+  because `tests/integration/` is not a package on `sys.path` — the
+  adapter and the test harness each load `TcpTrajectory` through their
+  own file-path `sys.modules` key and `isinstance` would reject
+  legitimately-shaped inputs across those two loader keys. IK
+  exceptions re-raised as `ValueError` carrying `sample {i}
+  (t={t}s)` context; `None` / non-sequence / wrong-length / non-finite
+  / non-numeric returns rejected with the same style. Validation
+  surface: non-`TcpTrajectory`-shaped input raises `TypeError`; empty
+  or duplicate `joint_names`, seed length mismatch, non-finite /
+  non-numeric seed all raise `ValueError`. Pure stdlib; no numpy, no
+  ROS, no MuJoCo. Pinned by 30 unit tests in
+  `tests/unit/test_r2_joints_from_tcp.py`: export surface, frozen
+  dataclass property, `__len__` / `duration_s`, times forwarded
+  verbatim, `MappingProxyType` read-only contract, positions keyed by
+  joint names with correct length, degenerate single-sample
+  `duration_s` = 0, seed-echo produces constant joint streams, IK
+  receives TCP position and quaternion verbatim, seed threaded from
+  previous output (counter-IK ramp `1, 2, 3, 4, 5`), first seed is the
+  caller-supplied one (subsequent seeds are prior outputs), the full
+  validation matrix (non-`TcpTrajectory` shape, empty / duplicate
+  joint names, seed length mismatch, non-finite and non-numeric seed,
+  IK-exception wrap with correct sample index, IK returning `None` /
+  non-sequence / wrong length / non-finite / non-numeric), and
+  interop with `arc_trajectory` and `sine_in_z_trajectory`. Unit
+  gate now reports **450 passed** (up from 420). Full
+  `scripts/run_tests.sh` green end-to-end: unit (450) + colcon test
+  (10 packages, 22 `test_math` + 5 `test_filters` + 4
+  `test_pseudo_inverse` gtests) + integration (12 launch tests ×
+  {ur5e, ur15}), ~5 min wall clock.
+- **Prior iteration: R2 stage-2 commanded-signal generator
   (pre-bake for M6.13).** Added
   `tests/integration/r2_stage2_commands.py` exporting
   `AllJointsCommandTrace` (frozen dataclass: `joint_names`,
@@ -203,9 +252,8 @@ Still missing on the pre-bake chain:
 
 ## Test status
 
-- Unit tests: `scripts/run_tests.sh --unit-only` — **420 passed**
-  (up from 396; +24 tests pinning the stage-2 commanded-signal
-  generator).
+- Unit tests: `scripts/run_tests.sh --unit-only` — **450 passed**
+  (up from 420; +30 tests pinning the IK-injected adapter).
 - Integration tests: re-run this iteration — all **12** launch
   tests green (sim smoke + 3 crisp roles + simple_joint_impedance
   + cartesian_motion, each × {ur5e, ur15}); ~5:20 wall clock.
