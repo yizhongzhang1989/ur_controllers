@@ -1,36 +1,62 @@
 # Status
 
-_Last updated: 2026-04-24 (R3 MJCF payload **stripper** landed as
-`tests/integration/r3_payload_strip.py` + 34 unit tests — inverse of
-the splicer, closes the M6.17 swap-in-place seam. Given an MJCF
-document and a `body_name` (default `ee_payload`), removes a single
-matching `<body>` element anywhere in the tree and re-serialises via
-`ET.tostring(..., encoding="unicode")`. Idempotent: if no match is
-found the input is returned byte-identical (fast path skips the parse
-entirely when `body_name` is absent as a substring, so malformed
-baselines and the zero-mass `no_payload` input both round-trip
-losslessly). `splice → strip` recovers the semantic tree of the
-original MJCF; `strip → splice` enables an in-place payload swap
-without tripping the splicer's double-splice guard. Ambiguous matches
-(>1 body with the same name) raise rather than guessing. Pure stdlib;
-imports only `xml.etree.ElementTree` + the sibling emitter's
-`DEFAULT_BODY_NAME`. Pinned by 34 unit tests in
-`tests/unit/test_r3_payload_strip.py`: export surface, idempotence
-(no match, malformed-when-absent, empty string, double-strip),
-splice↔strip semantic round-trip, body actually removed, anchor
-preserved, siblings (`<inertial>`, `<geom>`) preserved, deeply-nested
-anchor, all three catalog payloads round-trip, zero-mass no-op,
-custom `body_name` override + textual false-positive, ambiguous-match
-error, full input-validation matrix (non-str / malformed mjcf,
-non-str / empty / whitespace `body_name`), and the in-place
-swap-payload composition (`strip → splice` with two different
-payloads). Unit gate now reports **741 passed** (up from 707).
-Full `scripts/run_tests.sh` green end-to-end: unit (741) + colcon
-test (10 packages, 22 `test_math` + 5 `test_filters` + 4
+_Last updated: 2026-04-24 (R2 run-artefact writer landed as
+`tests/integration/r2_run_artefact.py` + 55 unit tests — closes the
+seam called out verbatim in ROADMAP §"M6 hard requirements" R2:
+"Each stage must publish, in the run artefact under
+`evaluation/runs/<ts>/`, the theoretical expectation alongside the
+measured result". Exports `R2Artefact(stage, arm, controller,
+payload, theoretical, measured, passed, reasons, metadata)` frozen
+dataclass + `write_r2_artefact(run_dir, artefact, *, overwrite=False)
+-> Path` + `artefact_filename(...)` helper + `SCHEMA_VERSION=1`
+constant + `SUPPORTED_STAGES=(1,2,3)`. Filename is derived
+(`r2_stage{stage}_{arm}_{controller}_{payload}.yaml`) so the M5
+compare driver can glob R2 artefacts without a schema-file lookup.
+Output is deterministic: `sort_keys=False` with a pinned top-level
+key order (`schema_version` first, then stage / arm / controller /
+payload / passed / reasons / metadata / theoretical / measured), and
+nested dicts recursively sorted so two runs with the same logical
+payload emit byte-identical files. `theoretical` / `measured` /
+`metadata` are recursively normalised before serialisation: `Mapping
+-> dict`, `tuple -> list`, all dict keys must be `str`, all floats
+must be finite, and only JSON-safe leaf types (`str`, `int`, `float`,
+`bool`, `None`) are permitted. Validation errors carry a path
+locator (e.g. `theoretical.response.zeta: non-finite float nan`) so
+the offending field is identified instead of a flat traceback.
+`passed=False` requires non-empty `reasons` (a failed artefact with
+no diagnosis is almost always a test bug); `passed=True` allows
+empty reasons. `run_dir` is auto-created; existing files are not
+overwritten unless `overwrite=True`. Pre-write validation runs before
+any I/O so a rejected artefact never half-writes. Pure stdlib +
+PyYAML (already a repo dep, see `expectations_loader.py`); no ROS,
+no numpy. Pinned by 55 unit tests in `tests/unit/test_r2_run_artefact.py`:
+export surface, frozen dataclass, filename derivation matrix
+({stage} × {arm} × {payload} = 18 combos), all filename-derivation
+validation errors (stage / arm / payload / empty / slash / non-str
+controller), round-trip via `yaml.safe_load`, top-level key order
+pinned, deterministic bytes across writes, nested-dict keys sorted,
+tuples become lists, `MappingProxyType` round-trips as plain dict,
+default (empty) metadata + reasons, `run_dir` auto-creation,
+overwrite-refusal + `overwrite=True` flag, rejections for non-Path
+`run_dir` / non-`R2Artefact` / non-bool `passed` / list-instead-of-tuple
+reasons / non-str reason entry / empty-string reason / non-mapping
+theoretical / non-mapping measured / non-mapping metadata, NaN / ±Inf
+rejection (flat + nested dict + nested list with path locator),
+non-str / empty-string dict keys, unsupported leaf types (`set`,
+`bytes`, arbitrary `object()`), and a happy-path matrix across all
+JSON-safe leaf types. Unit gate now reports **796 passed** (up from
+741). Full `scripts/run_tests.sh` green end-to-end: unit (796) +
+colcon test (10 packages, 22 `test_math` + 5 `test_filters` + 4
 `test_pseudo_inverse` gtests) + integration (12 launch tests ×
-{ur5e, ur15}), ~5:26 wall clock for the integration slice.
+{ur5e, ur15}), ~5:27 wall clock for the integration slice.
 M6.0 operator gate still active for every bullet that requires
 live sim changes.)._
+
+_Previous iteration: R3 MJCF payload **stripper** landed as
+`tests/integration/r3_payload_strip.py` + 34 unit tests — inverse of
+the splicer, closes the M6.17 swap-in-place seam (see 2026-04-24
+summary immediately above this entry; full detail preserved in
+commit 05d839c)._
 
 _Previous iteration: R3 `EePayload` message-shape builder
 landed as `tests/integration/r3_payload_ee_msg.py` + 27 unit tests —
@@ -127,11 +153,12 @@ Still missing on the pre-bake chain:
    decision is independent of the orchestrator wiring.
 2. M6.19 payload parametrisation across R2 stages (needs M6.16–
    M6.18 to land first). The validator + MJCF emitter + MJCF
-   splicer + EePayload message-shape builder landed so far are
-   the preflight seams those bullets will plug into; the message
-   seam is deliberately decoupled from the MJCF seam so the
-   `ur_sim_msgs/EePayload` vs `geometry_msgs/Inertia + PoseStamped`
-   decision (M6 R3 blocker #3) can still be made independently.
+   splicer + stripper + EePayload message-shape builder landed so
+   far are the preflight seams those bullets will plug into; the
+   message seam is deliberately decoupled from the MJCF seam so
+   the `ur_sim_msgs/EePayload` vs `geometry_msgs/Inertia +
+   PoseStamped` decision (M6 R3 blocker #3) can still be made
+   independently.
 3. A thin ROS-side `EePayloadMessage -> ur_sim_msgs/EePayload`
    materialiser — by design lives outside the pre-bake chain so
    it can import `ur_sim_msgs` (and decide whether to use
@@ -139,7 +166,29 @@ Still missing on the pre-bake chain:
 
 ## Last completed tasks
 
-- **This iteration: R3 MJCF payload stripper (closes M6.17
+- **This iteration: R2 run-artefact writer (closes the R2
+  "publish theoretical alongside measured" seam).** Added
+  `tests/integration/r2_run_artefact.py` exporting the frozen
+  dataclass `R2Artefact` + `write_r2_artefact(run_dir, artefact,
+  *, overwrite=False) -> Path` + `artefact_filename(...)` helper +
+  `SCHEMA_VERSION=1` + `SUPPORTED_STAGES=(1,2,3)`. Filename is
+  derived (`r2_stage{stage}_{arm}_{controller}_{payload}.yaml`)
+  so the M5 compare driver can glob R2 artefacts without a
+  schema-file lookup. Output is deterministic: pinned top-level
+  key order (`schema_version` first) + nested dict keys sorted +
+  `tuple -> list` + `Mapping -> dict` normalisation. JSON-safe
+  leaf types only (`str` / `int` / `float` / `bool` / `None`);
+  NaN / ±Inf and unsupported types (`set`, `bytes`, arbitrary
+  objects) rejected with a path-locator error (e.g.
+  `theoretical.response.zeta: non-finite float nan`).
+  `passed=False` requires non-empty `reasons`; pre-write
+  validation runs before any I/O; existing files are not
+  overwritten unless `overwrite=True`; `run_dir` is auto-created.
+  Pure stdlib + PyYAML. Pinned by 55 unit tests in
+  `tests/unit/test_r2_run_artefact.py` — unit gate now reports
+  **796 passed** (up from 741).
+
+- **Prior iteration: R3 MJCF payload stripper (closes M6.17
   swap-in-place seam).** Added `tests/integration/r3_payload_strip.py`
   exporting `strip_payload_from_mjcf(mjcf, *, body_name="ee_payload")
   -> str` plus a re-exported `DEFAULT_BODY_NAME` sentinel. Inverse of
