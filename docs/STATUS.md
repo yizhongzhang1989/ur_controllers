@@ -1,12 +1,15 @@
 # Status
 
-_Last updated: 2026-04-24 (JTC goal-builder pre-bake landed as
-`tests/integration/r2_jtc_goal.py` + 38 unit tests — converts any of
-the three R2 commanded-trace types into a
-`trajectory_msgs/JointTrajectory`-shaped `JointTrajectoryGoal` struct,
-closing the last glue module before orchestrator test bodies can be
-written for M6.12 / M6.13 / M6.14. M6.0 operator gate still active for
-every bullet that requires live sim changes.)._
+_Last updated: 2026-04-24 (stage-2 cartesian-mode evaluator pre-bake
+landed as `tests/integration/r2_stage2_cartesian.py` + 33 unit tests
++ `stage2_tcp` block in both arm expectation YAMLs — closes the
+cartesian-mode branch of R2 stage-2's "kinematic consistency" check
+(5 mm + 2°) that was previously deferred in
+`r2_stage2_assertions.py`. Evaluator composes with
+`r2_tcp_from_joints.py` (injected FK) so the stage-2 orchestrator can
+now assert both joint-space and cartesian-mode outcomes without any
+extra glue. M6.0 operator gate still active for every bullet that
+requires live sim changes.)._
 
 ## Current milestone
 
@@ -70,7 +73,64 @@ Still missing on the pre-bake chain:
 
 ## Last completed tasks
 
-- **This iteration: JTC goal-builder pre-bake (closes the
+- **This iteration: stage-2 cartesian-mode evaluator (closes the
+  deferred "FK / TCP-level checks" note in
+  `r2_stage2_assertions.py`).** Added
+  `tests/integration/r2_stage2_cartesian.py` exporting
+  `Stage2CartesianResult` (frozen dataclass with `ok` + `format()`)
+  and `evaluate_all_joints_cartesian(controller, *, commanded_tcp,
+  measured_tcp, position_peak_err_mm, orientation_peak_err_deg) ->
+  Stage2CartesianResult`, plus an `_from_expectation` wrapper sourcing
+  the 5 mm / 2° bounds from the loader's new `stage2_tcp` accessor.
+  Takes two :class:`TcpTrajectory` (duck-typed via
+  `times` / `positions` / `orientations` attributes so the FK-adapter
+  and the commanded-side generator both qualify without an
+  `isinstance` check — same cross-loader posture as
+  `r2_joints_from_tcp.py`). Asserts the ROADMAP R2 wording exactly:
+  peak position error ≤ 5 mm, peak per-axis (roll/pitch/yaw)
+  orientation error ≤ 2°; uses the same intrinsic-XYZ Euler
+  decomposition and antipodal-quaternion handling as
+  `r2_stage3_assertions._quat_relative_rpy_deg` so stage-2 and
+  stage-3 numbers are directly comparable. No RMSE / no drift check
+  (stage-2 text doesn't ask for them — those are stage-3-only).
+  Validation matrix: non-positive / non-finite tolerances,
+  missing-attribute inputs (TypeError), sample-count mismatch
+  (explicit "does not resample" error — caller must align
+  timebases), < 2 samples, non-monotonic / non-finite times,
+  wrong-length / non-finite positions, wrong-length / non-finite
+  quaternions, quaternion norm outside the [0.5, 1.5] band that the
+  sibling modules already use. Pure stdlib; no numpy, no ROS, no
+  MuJoCo. Also extended `expectations_loader.py` with
+  `Stage2TcpTolerances` dataclass and `ArmExpectation.stage2_tcp`
+  field, added the `stage2_tcp: {position_peak_err_mm: 5.0,
+  orientation_peak_err_deg: 2.0}` block to both
+  `expectations/ur5e.yaml` and `expectations/ur15.yaml`, and pinned
+  block equality across arms in `test_expectations_schema.py`
+  (matches the ROADMAP R2 "pass/fail thresholds are the same"
+  rule). Updated the `r2_stage2_assertions.py` module docstring
+  so the previously-deferred cartesian variant now points to the
+  new module. Pinned by 33 unit tests in
+  `tests/unit/test_r2_stage2_cartesian.py`: export surface,
+  frozen-dataclass property, `ok` / `format()`, identical
+  trajectories → zero error / `ok=True`, antipodal quaternion pair
+  yields zero orientation error (short-arc rule), position offsets
+  reported in mm (not m), over-tolerance position fails with a
+  single failure string, orientation rotation about Z measured in
+  degrees to 1e-6, over-tolerance orientation fails, both
+  tolerances violated → two failures reported, peak taken over the
+  whole trace (linearly growing drift), controller-name echo, the
+  full tolerance-validation matrix (zero / negative / NaN / inf for
+  both tolerances), and the full trajectory-shape validation
+  matrix. Expectation-driven wrapper is exercised with both
+  in-tree `ur5e` and `ur15` YAMLs plus a duck-typed fake
+  `ArmExpectation` so the `_from_expectation` contract is
+  dataclass-structural, not module-typed. Unit gate now reports
+  **522 passed** (up from 489 — +33 cartesian evaluator tests plus
+  +1 schema equality test). Full `scripts/run_tests.sh` green
+  end-to-end: unit (522) + colcon test (10 packages, 22 `test_math`
+  + 5 `test_filters` + 4 `test_pseudo_inverse` gtests) +
+  integration (12 launch tests × {ur5e, ur15}), ~5:10 wall clock.
+- **Prior iteration: JTC goal-builder pre-bake (closes the
   `(joint_names, times, positions)` → `JointTrajectoryGoal` seam).**
   Added `tests/integration/r2_jtc_goal.py` exporting
   `JointTrajectoryPoint`, `JointTrajectoryGoal` (both frozen
@@ -305,11 +365,12 @@ Still missing on the pre-bake chain:
 
 ## Test status
 
-- Unit tests: `scripts/run_tests.sh --unit-only` — **488 passed**
-  (up from 450; +38 tests pinning the JTC goal-builder).
+- Unit tests: `scripts/run_tests.sh --unit-only` — **522 passed**
+  (up from 488; +33 cartesian-evaluator tests plus +1 new schema
+  equality test).
 - Integration tests: re-run this iteration — all **12** launch
   tests green (sim smoke + 3 crisp roles + simple_joint_impedance
-  + cartesian_motion, each × {ur5e, ur15}); ~5:20 wall clock.
+  + cartesian_motion, each × {ur5e, ur15}); ~4:50 wall clock.
 - `colcon test`: **10** packages pass (22 `test_math` gtests +
   4 `test_pseudo_inverse` + 5 `test_filters` gtests from
   `crisp_controllers`).

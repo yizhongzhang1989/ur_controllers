@@ -103,12 +103,27 @@ class Stage2Tolerances:
 
 
 @dataclass(frozen=True)
+class Stage2TcpTolerances:
+    """R2 stage-2 *cartesian-mode* consistency tolerances.
+
+    Matches the kwargs of
+    ``r2_stage2_cartesian.evaluate_all_joints_cartesian``. Keeps the
+    pre-baked evaluator decoupled from the YAML while giving test
+    authors one typed source-of-truth for the numbers.
+    """
+
+    position_peak_err_mm: float
+    orientation_peak_err_deg: float
+
+
+@dataclass(frozen=True)
 class ArmExpectation:
     arm: str
     draft: bool
     joints: Tuple[JointExpectation, ...]
     controllers: Mapping[str, ControllerExpectation]
     stage2: Stage2Tolerances
+    stage2_tcp: Stage2TcpTolerances
     tcp_tolerances: Mapping[str, float]
 
     def joint(self, name: str) -> JointExpectation:
@@ -241,6 +256,24 @@ def load_arm(arm: str, expect_dir: Path = EXPECT_DIR) -> ArmExpectation:
         ),
     )
 
+    stage2_tcp_raw = doc.get("stage2_tcp")
+    if not isinstance(stage2_tcp_raw, dict):
+        raise ValueError(f"{arm}.yaml: missing required 'stage2_tcp' mapping")
+    stage2_tcp_keys = ("position_peak_err_mm", "orientation_peak_err_deg")
+    missing_tcp = [k for k in stage2_tcp_keys if k not in stage2_tcp_raw]
+    if missing_tcp:
+        raise ValueError(f"{arm}.yaml: stage2_tcp missing required keys {missing_tcp}")
+    stage2_tcp = Stage2TcpTolerances(
+        position_peak_err_mm=_as_float(
+            stage2_tcp_raw["position_peak_err_mm"],
+            f"{arm}:stage2_tcp.position_peak_err_mm",
+        ),
+        orientation_peak_err_deg=_as_float(
+            stage2_tcp_raw["orientation_peak_err_deg"],
+            f"{arm}:stage2_tcp.orientation_peak_err_deg",
+        ),
+    )
+
     tcp_raw = doc["tcp"]["tolerances"]
     tcp_tol = {k: _as_float(v, f"{arm}:tcp.tolerances.{k}") for k, v in tcp_raw.items()}
 
@@ -250,6 +283,7 @@ def load_arm(arm: str, expect_dir: Path = EXPECT_DIR) -> ArmExpectation:
         joints=joints,
         controllers=controllers,
         stage2=stage2,
+        stage2_tcp=stage2_tcp,
         tcp_tolerances=tcp_tol,
     )
 
@@ -350,6 +384,7 @@ __all__: Sequence[str] = (
     "PayloadCatalog",
     "REPO_ROOT",
     "Stage2Tolerances",
+    "Stage2TcpTolerances",
     "SUPPORTED_ARMS",
     "damping_ratio_within_band",
     "load_arm",

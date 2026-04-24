@@ -82,6 +82,11 @@ STAGE2_TOLERANCE_KEYS = {
     "saturation_hold_ms",
 }
 
+STAGE2_TCP_TOLERANCE_KEYS = {
+    "position_peak_err_mm",
+    "orientation_peak_err_deg",
+}
+
 INERTIA_KEYS = ("ixx", "iyy", "izz", "ixy", "ixz", "iyz")
 
 
@@ -162,6 +167,13 @@ def _check_arm(doc: dict, arm_name: str) -> None:
         assert isinstance(v, (int, float)) and not isinstance(v, bool), (k, v)
         assert v > 0.0, (k, v)
 
+    stage2_tcp = doc["stage2_tcp"]
+    assert isinstance(stage2_tcp, dict), stage2_tcp
+    assert set(stage2_tcp.keys()) == STAGE2_TCP_TOLERANCE_KEYS, set(stage2_tcp.keys())
+    for k, v in stage2_tcp.items():
+        assert isinstance(v, (int, float)) and not isinstance(v, bool), (k, v)
+        assert v > 0.0, (k, v)
+
 
 def test_ur5e_schema(ur5e: dict) -> None:
     _check_arm(ur5e, "ur5e")
@@ -185,6 +197,12 @@ def test_both_arms_share_stage2_values(ur5e: dict, ur15: dict) -> None:
     # pin full block equality, not just the key set, so a per-arm
     # tweak has to be explicit (via an ADR).
     assert ur5e["stage2"] == ur15["stage2"]
+
+
+def test_both_arms_share_stage2_tcp_values(ur5e: dict, ur15: dict) -> None:
+    # Same rationale as stage2: cartesian-mode pass/fail thresholds
+    # are arm-independent per ROADMAP R2.
+    assert ur5e["stage2_tcp"] == ur15["stage2_tcp"]
 
 
 # ---------------------------------------------------------------------------

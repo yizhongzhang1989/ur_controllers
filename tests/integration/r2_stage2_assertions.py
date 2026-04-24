@@ -16,10 +16,12 @@ from home → cluttered pose → home and asserts:
 * **Kinematic consistency** — TCP FK from measured ``q`` matches the
   expected trajectory within tolerance (joint-space) or ``5 mm + 2°``
   (cartesian mode). In *joint-space* mode the check reduces to a
-  per-joint tracking-error bound on ``|q(t) - q_cmd(t)|``; the FK /
-  cartesian-mode variant will be added when M6.14 pre-bakes the FK
-  helper (deferred — no pure-Python UR DH table lands without operator
-  review).
+  per-joint tracking-error bound on ``|q(t) - q_cmd(t)|``; the
+  *cartesian-mode* variant lives in
+  :mod:`tests.integration.r2_stage2_cartesian` and composes with
+  :mod:`tests.integration.r2_tcp_from_joints` (injected FK) to fold
+  both commanded and measured joint traces into ``TcpTrajectory``
+  pairs before applying the 5 mm + 2° bound.
 * **No stall** — every joint completes the motion; no joint holds
   torque saturation for more than ``saturation_hold_ms`` contiguously.
 
@@ -42,8 +44,9 @@ plus the *no-stall* branch. Namely, per joint:
 Non-goals
 ---------
 
-* FK / TCP-level checks (deferred to the M6.14 pre-bake once the
-  kinematics source is agreed).
+* FK / TCP-level checks live in
+  :mod:`tests.integration.r2_stage2_cartesian` (added once the
+  FK-injection adapter landed). This module is strictly joint-space.
 * Reading tolerances from the expectation YAML: the schema does not
   yet have a stage-2 block (ADR-0013 flagged this as a follow-up).
   Callers pass tolerances as explicit kwargs; values will migrate

@@ -99,6 +99,13 @@ stage2:
   peak_tracking_err_rad: 0.15
   saturation_hold_ms: 100.0
 
+# R2 stage-2 *cartesian-mode* consistency tolerances. See the matching
+# block in ur5e.yaml for rationale; both arms share the same values
+# and the schema test pins block equality.
+stage2_tcp:
+  position_peak_err_mm: 5.0
+  orientation_peak_err_deg: 2.0
+
 tcp:
   tolerances:
     tcp_rmse_mm: 5.0
