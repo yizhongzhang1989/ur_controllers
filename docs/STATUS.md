@@ -1,6 +1,73 @@
 # Status
 
-_Last updated: 2026-04-24 (R2 **stage-3 theoretical-block builder**
+_Last updated: 2026-04-24 (R2 **stage-1 gain resolver** landed as
+`tests/integration/r2_stage1_gains.py` + 42 unit tests — closes the
+last seam between the bringup controller YAMLs and the stage-1
+theoretical-block builder's `stiffness_k`/`damping_d` arguments. One
+narrow function `resolve_joint_impedance_gains(controller, arm, *,
+config_dir=None) -> dict[str, tuple[float, float]]`, ordered by the
+YAML's own `joints` list, returning per-joint `(K, D)` for the two
+supported impedance controllers: `simple_joint_impedance`
+(per-joint `k[i]`/`d[i]` arrays under
+`simple_joint_impedance_controller.ros__parameters`) and
+`crisp_joint_impedance` (scalar `nullspace.stiffness` /
+`nullspace.damping` broadcast to all six joints). Damping auto-fill:
+a negative `d[i]` or negative scalar `nullspace.damping` resolves to
+critical damping `2*sqrt(K)` — matches both the simple controller's
+on-activation rule (parameter description in
+`src/simple_joint_impedance_controller/src/simple_joint_impedance_controller.yaml`)
+and crisp's `nullspace.damping: -1.0` sentinel (comment in the
+committed bringup YAMLs). Strict validation: unknown
+controller/arm/`ValueError`, missing file/`FileNotFoundError`,
+missing key/`KeyError` with dotted path, length mismatch / duplicate
+joints / empty joints / non-finite or negative K /
+`ValueError`, non-numeric `k`/`d` entries including
+`bool`/`TypeError`, non-finite `D`/`ValueError`. `SUPPORTED_ARMS`
+and `CANONICAL_JOINTS` pinned against
+`expectations_loader`'s values by dedicated tests so a drift in
+either fails loudly. Pure stdlib + PyYAML (already in-tree per the
+"python deps" repo memory). Pinned by 42 unit tests in
+`tests/unit/test_r2_stage1_gains.py`: export surface
+(`__all__`, pinned `SUPPORTED_CONTROLLERS`, cross-check vs.
+`expectations_loader`); happy-path matrix over both controllers x
+both arms against the **committed** `bringup/config/*.yaml` values
+(per-joint K/D equality with `yaml.safe_load` re-read of the same
+file); crisp auto-damping sentinel verified across both arms;
+cross-controller sanity (crisp broadcasts scalar K; simple does
+not); UR15-heavier-than-UR5e stiffness invariant; return-type
+invariants (plain `dict`, plain-float tuples, per-call independent
+instances); temp-YAML matrix covering simple auto-damping,
+crisp explicit / auto damping, missing-top-key, missing
+`ros__parameters`, missing `joints`/`k`/`nullspace`/`stiffness`/
+`damping`, length mismatch, duplicate joints, empty joints,
+negative K, NaN K, non-numeric K, `bool` K (guards against the
+`bool`-is-`int` gotcha), infinite D, non-mapping top-level, crisp
+`nullspace` wrong type; and an end-to-end thread-through test that
+feeds every resolved `(K, D)` into
+`theoretical_for_stage1(controller_exp, joint_exp=..., stiffness_k=K,
+damping_d=D)` on both arms and both controllers and verifies the
+resulting `response` block echoes K/D verbatim and `omega_n_rad_s ==
+sqrt(K / J_eff)` against the expectations loader's per-joint
+`effective_inertia_kg_m2`. Unit gate now reports **996 passed** (up
+from 954). Full `scripts/run_tests.sh` green end-to-end: unit (996)
++ colcon test (10 packages, 22 `test_math` + 5 `test_filters` + 4
+`test_pseudo_inverse` gtests) + integration (12 launch tests x
+{ur5e, ur15}), ~5:18 wall clock for the integration slice. With
+this helper in place, the final R2 stage-1 test body (M6.12 for
+the `crisp_joint_impedance` / `simple_joint_impedance` rows)
+reduces to: `gains = resolve_joint_impedance_gains(c, arm)` ->
+`for joint, (K, D) in gains.items(): theoretical =
+theoretical_for_stage1(c_exp, joint_exp=arm_exp.joint(joint),
+stiffness_k=K, damping_d=D)` -> `result = evaluate_*(...)` ->
+`result_to_artefact(stage=1, ..., theoretical=theoretical,
+result=result)` -> `write_r2_artefact(run_dir, artefact)`. The
+only remaining open seams on the pre-bake chain are the concrete
+FK/IK backends (deliberately kept out of tree) and the thin ROS-side
+`JointTrajectoryGoal -> FollowJointTrajectory.Goal` materialiser
+(must stay outside the pre-bake chain so it can import
+`trajectory_msgs` at test-run time)._
+
+_Previous iteration: R2 **stage-3 theoretical-block builder**
 landed as `tests/integration/r2_stage3_theoretical.py` + 21 unit
 tests — closes the expectations-loader → `r2_result_to_artefact`
 seam for stage-3 and **completes the R2 theoretical-block pre-bake
@@ -332,27 +399,27 @@ FK-injected adapter (`r2_tcp_from_joints.py`), the stage-1
 **commanded** joint-space generators (`r2_stage1_commands.py`), the
 stage-2 **commanded** all-joints generator (`r2_stage2_commands.py`),
 the IK-injected adapter (`r2_joints_from_tcp.py`), the
-**JTC goal-builder** (`r2_jtc_goal.py`), the **stage-1 theoretical
-block builder** (`r2_stage1_theoretical.py`), and now the **stage-2
-theoretical block builder** (`r2_stage2_theoretical.py` — narrow
-joint-space + cartesian dispatch against the
-`ArmExpectation.stage2` / `ArmExpectation.stage2_tcp` accessors,
-emitting `{response_model, tolerances}` blocks ready to thread
-through `result_to_artefact(stage=2, ...)`), M6.12 (R2 stage-1), the
-joint-space path of M6.13 (R2 stage-2), and **both** paths of M6.14
-(R2 stage-3 `cartesian_motion` via the direct TCP commanded generators
-**and** `JTC + ik_shim` via the IK adapter) can all be authored
-end-to-end as sim-collection orchestrators — the remaining seam is a
-thin ROS-side `JointTrajectoryGoal -> FollowJointTrajectory.Goal`
+**JTC goal-builder** (`r2_jtc_goal.py`), all three R2
+theoretical-block builders (`r2_stage{1,2,3}_theoretical.py`), and
+now the **stage-1 gain resolver** (`r2_stage1_gains.py` — narrow
+`resolve_joint_impedance_gains(controller, arm)` against the
+committed `bringup/config/{simple,crisp}_joint_impedance.{ur5e,ur15}.yaml`,
+auto-filling critical damping for negative `d` / `nullspace.damping:
+-1.0`), M6.12 (R2 stage-1), the joint-space path of M6.13 (R2 stage-2),
+and **both** paths of M6.14 (R2 stage-3 `cartesian_motion` via the
+direct TCP commanded generators **and** `JTC + ik_shim` via the IK
+adapter) can all be authored end-to-end as sim-collection
+orchestrators — the remaining seam is a thin ROS-side
+`JointTrajectoryGoal -> FollowJointTrajectory.Goal`
 materialiser which by design lives outside the pre-bake chain so it
 can import `trajectory_msgs` at test-run time.
 
 Still missing on the pre-bake chain:
 
-1. ~~R2 stage-3 theoretical-block builder~~ — **landed this iteration**
-   as `r2_stage3_theoretical.py` (see top-of-file summary). The R2
-   theoretical-block pre-bake chain is now complete across stages 1,
-   2 (both paths) and 3.
+1. ~~R2 stage-1 gain resolver~~ — **landed this iteration** as
+   `r2_stage1_gains.py` (see top-of-file summary). Stage-1 test
+   bodies now resolve `(K, D)` from the committed bringup YAMLs in
+   one call.
 2. The concrete FK **and** IK backends themselves — both adapters
    deliberately keep these out of tree so the source / licensing
    decision is independent of the orchestrator wiring.
@@ -371,7 +438,46 @@ Still missing on the pre-bake chain:
 
 ## Last completed tasks
 
-- **This iteration: R2 stage-3 theoretical-block builder (closes the
+- **This iteration: R2 stage-1 gain resolver (closes the bringup-
+  controller-YAML → `r2_stage1_theoretical` seam so stage-1 test
+  bodies don't open-code `yaml.safe_load` + key-walk).** Added
+  `tests/integration/r2_stage1_gains.py` exporting a single narrow
+  function `resolve_joint_impedance_gains(controller, arm, *,
+  config_dir=None) -> dict[str, tuple[float, float]]` plus pinned
+  `SUPPORTED_CONTROLLERS = ("simple_joint_impedance",
+  "crisp_joint_impedance")`, `SUPPORTED_ARMS`, `CANONICAL_JOINTS`,
+  and `DEFAULT_CONFIG_DIR = bringup/config`. Covers the two
+  joint-impedance bringup YAMLs: `simple_joint_impedance` reads
+  per-joint `k[i]` / `d[i]` arrays; `crisp_joint_impedance` reads
+  scalar `nullspace.stiffness` / `nullspace.damping` and broadcasts
+  across the six joints. Damping auto-fill: negative `d` value
+  resolves to critical damping `2*sqrt(K)`, matching both the
+  simple controller's on-activation rule (parameter description in
+  `src/simple_joint_impedance_controller/src/simple_joint_impedance_controller.yaml`)
+  and crisp's `nullspace.damping: -1.0` sentinel (comment in the
+  committed bringup YAMLs). Strict validation: unknown
+  controller/arm/missing file/malformed YAML all raise with
+  actionable messages (`ValueError` with dotted path,
+  `FileNotFoundError`, `KeyError`, `TypeError` for non-numeric or
+  `bool` gains). Pure stdlib + PyYAML. Pinned by 42 unit tests in
+  `tests/unit/test_r2_stage1_gains.py`: export surface; happy-path
+  matrix over both controllers × both arms against the **committed**
+  `bringup/config/*.yaml` values (re-reading the same file via
+  `yaml.safe_load` for the expected values); crisp auto-damping
+  sentinel across both arms; cross-controller sanity (crisp
+  broadcasts scalar K, simple does not); UR15 > UR5e stiffness
+  invariant; return-type invariants; full temp-YAML error matrix
+  (missing keys, length mismatch, duplicates, empty joints,
+  negative K, NaN K, inf D, non-numeric, `bool`-as-gain,
+  non-mapping top-level); and an end-to-end thread-through feeding
+  every resolved `(K, D)` into `theoretical_for_stage1` on both
+  arms × both controllers to verify the resulting `response` block
+  echoes K/D verbatim and `omega_n_rad_s == sqrt(K / J_eff)`
+  against the loader's per-joint `effective_inertia_kg_m2`. Unit
+  gate **996 passed** (up from 954). Full `scripts/run_tests.sh`
+  green end-to-end.
+
+- **Prior iteration: R2 stage-3 theoretical-block builder (closes the
   expectations-loader → `r2_result_to_artefact` seam for stage-3 and
   completes the R2 theoretical-block pre-bake chain across stages 1,
   2 (both paths) and 3).** Added
@@ -1039,11 +1145,11 @@ Still missing on the pre-bake chain:
 
 ## Test status
 
-- Unit tests: `scripts/run_tests.sh --unit-only` — **933 passed**
-  (up from 905; +28 R2 stage-2 theoretical-block builder tests).
+- Unit tests: `scripts/run_tests.sh --unit-only` — **996 passed**
+  (up from 954; +42 R2 stage-1 gain resolver tests).
 - Integration tests: re-run this iteration — all **12** launch
   tests green (sim smoke + 3 crisp roles + simple_joint_impedance
-  + cartesian_motion, each × {ur5e, ur15}); ~5:00 wall clock.
+  + cartesian_motion, each × {ur5e, ur15}); ~5:18 wall clock.
 - `colcon test`: **10** packages pass (22 `test_math` gtests +
   4 `test_pseudo_inverse` + 5 `test_filters` gtests from
   `crisp_controllers`).
