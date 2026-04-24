@@ -1,10 +1,10 @@
 # Status
 
-_Last updated: 2026-04-24 (R2 signal-analysis helpers + 19 unit
-tests landed; pre-bakes the measured-signal assertion vocabulary
-that R2 stage-1 tests will call on ``/joint_states`` traces. M6.0
-operator gate still active for every bullet that requires live sim
-changes)._
+_Last updated: 2026-04-24 (R2 stage-1 assertion harness + 18 unit
+tests landed; pairs `ControllerExpectation` tolerances with
+`signal_analysis` measurements into per-response-model evaluators so
+R2 stage-1 tests reduce to sim-collection + one call. M6.0 operator
+gate still active for every bullet that requires live sim changes)._
 
 ## Current milestone
 
@@ -31,33 +31,48 @@ Still gated on **M6.0** (vendoring strategy for
 7. M6.10 / M6.11 / M6.16–M6.19 can interleave once M6.0 gives us
    a target `ur_robot_driver` version and payload plumbing.
 
-With M6.15's schema live plus the loader, theoretical helpers, and
-now the measured-signal helpers all pre-baked, M6.12–M6.14 (R2
-tests) can be authored end-to-end against the expectation + signal
-vocabulary *before* the sim bullets land — they just can't run
-until M6.5 ships.
+With M6.15's schema live plus the loader, theoretical helpers,
+measured-signal helpers, and now the stage-1 assertion harness all
+pre-baked, M6.12 (R2 stage-1) can be authored end-to-end as a sim-
+collection orchestrator on top of `evaluate_position_mode` /
+`evaluate_open_loop_effort` / `evaluate_second_order` *before* the
+sim bullets land — it just can't run until M6.5 ships. M6.13 /
+M6.14 remain to be designed against their own signal/expectation
+pairings (stage-2 all-joints FK check, stage-3 TCP trajectory).
 
 ## Last completed tasks
 
-- **This iteration: R2 signal-analysis helpers.** New
-  `tests/integration/signal_analysis.py` exposes the
-  measured-signal side of the R2 stage-1 assertion vocabulary:
-  `steady_state_error`, `drift_peak_to_peak`, `velocity_rms` on
-  trailing windows, `find_extrema` + `damping_ratio_from_step`
-  (half-cycle log-decrement), and `detect_limit_cycle` (naïve
-  one-sided DFT over a frequency band with a median noise
-  floor). Pure stdlib — same dependency posture as
-  `expectations_loader.py` — so it runs in the unit-test gate
-  without numpy or ROS. Pinned by 19 unit tests in
-  `tests/unit/test_signal_analysis.py` exercising synthetic
-  step, sine, and noise signals with known ground truth, plus
-  five validation guards (length mismatch, non-monotonic time,
-  non-uniform sampling, empty band, bad params). Together with
-  `expectations_loader.py` this closes the "theoretical vs
-  measured" vocabulary R2 stage-1 needs; the R2 integration
-  tests (M6.12) can now be authored as a straight mapping
-  between `ArmExpectation.controller(c).tol(k)` and these
-  helpers.
+- **This iteration: R2 stage-1 assertion harness.** New
+  `tests/integration/r2_stage1_assertions.py` exposes three
+  evaluators — one per response model in the expectation YAML —
+  that take a `ControllerExpectation` + measured `/joint_states`
+  traces and return a `Stage1Result` (metrics + failure strings
+  + `.ok` + `.format()`):
+  - `evaluate_position_mode` (JTC / forward_position /
+    forward_velocity): steady-state error, trailing-window drift,
+    FFT limit-cycle on velocity. dB ↔ linear conversion handled
+    internally so the YAML keeps the R2-native
+    `fft_peak_db_above_noise_floor` key.
+  - `evaluate_open_loop_effort` (forward_effort): runaway bound
+    and an optional torque-trace saturation-hold check using a
+    generic "longest-contiguous run in a bool mask, in ms" helper.
+  - `evaluate_second_order` (crisp / simple joint impedance):
+    peak error, trailing velocity RMS chatter, and damping-ratio-
+    vs-theory — theoretical ζ computed from `K`, `D`, and the
+    joint's `effective_inertia_kg_m2` via
+    `expectations_loader.second_order_response`; overdamped
+    theory (ζ ≥ 1) tolerates a `None` measurement (no oscillation
+    to fit), underdamped theory does not.
+  Pure stdlib; loads `signal_analysis` and `expectations_loader`
+  via importlib (sibling modules, `tests/integration/` isn't on
+  `sys.path` as a package). Pinned by 18 unit tests in
+  `tests/unit/test_r2_stage1_assertions.py` covering pass and fail
+  paths for each evaluator, the `Stage1Result` surface, trace-
+  length validation, and a missing-tolerance `KeyError` guard.
+  Together with the three prior pre-bake modules this closes the
+  last authoring dependency for M6.12.
+- **Prior iteration: R2 signal-analysis helpers**
+  (`tests/integration/signal_analysis.py` + 19 unit tests).
 - **Prior iteration: R2 expectations loader** (+29 unit tests
   in `test_expectations_loader.py`).
 - **Prior iteration: M6.15 — R2 expectation schema + first-draft
@@ -87,8 +102,8 @@ until M6.5 ships.
 
 ## Test status
 
-- Unit tests: `scripts/run_tests.sh --unit-only` — **227 passed**
-  (up from 208; +19 from `test_signal_analysis.py`).
+- Unit tests: `scripts/run_tests.sh --unit-only` — **245 passed**
+  (up from 227; +18 from `test_r2_stage1_assertions.py`).
 - Integration tests (pre-M6): still expected green —
   **22** `test_math` gtests + **5** `crisp_controllers` gtests +
   **12** integration tests (sim smoke + 3 crisp roles +
