@@ -1,13 +1,34 @@
 # Status
 
-_Last updated: 2026-04-25 (**blocker-only STATUS refresh — no code
-change this iteration**). Per AGENTS.md §3 step 7: the single next
-highest-value task under the current milestone (M6) is gated on the
-**M6.0 operator decision** (vendoring strategy for
-`mujoco_ros2_control` and target `ur_robot_driver` version). The
-pre-bake chain the agent has been extending across recent iterations
-is **complete for the gated R2/R3 orchestrator**; the STATUS entry
-below (from the prior iteration) enumerates the remaining open seams
+_Last updated: 2026-04-25 (**second consecutive blocker-only STATUS
+refresh — no code change this iteration**). The previous commit
+(`af84dcb docs(status): blocker-only refresh — M6 gated on M6.0`)
+landed earlier the same UTC day; this iteration re-evaluated the
+state and reached the same conclusion. No operator input has been
+received on M6.0 in the interval, and the R2/R3 pre-bake chain
+remains complete (re-audited this iteration against the last 30+
+`test(m6): …` commits — every declared seam has a landed helper,
+pinned by its dedicated unit test; the listed "remaining open
+seams" are all deferred-by-design rather than unwritten). The
+honest read on §3 step 7 of AGENTS.md is that the blocker persists
+and the correct action is again a STATUS-only commit rather than
+synthesising a narrow pre-bake that closes no new seam. The loop's
+no-progress guard is not tripped (each STATUS refresh is itself a
+commit), but two consecutive blocker-only iterations on the same
+operator gate is itself a signal the operator needs to act on M6.0
+before the auto-dev loop can continue making roadmap-moving
+progress. Tests gate was not re-run — no code changed; the prior
+iteration's `scripts/run_tests.sh` run (unit 1522 + colcon 10
+packages + integration 12 launch tests × {ur5e, ur15}, ~5:18 wall
+clock) remains the current green baseline. No submodule pointer
+changes, no DECISIONS.md additions. Per AGENTS.md §3 step 7: the
+single next highest-value task under the current milestone (M6)
+is gated on the **M6.0 operator decision** (vendoring strategy
+for `mujoco_ros2_control` and target `ur_robot_driver` version).
+The pre-bake chain the agent has been extending across recent
+iterations is **complete for the gated R2/R3 orchestrator**; the
+STATUS entry below (from the prior iteration) enumerates the
+remaining open seams
 as:
 (1) concrete FK/IK backends — deliberately kept out of tree so the
 source / licensing decision is independent of the orchestrator
