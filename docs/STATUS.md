@@ -1,6 +1,38 @@
 # Status
 
-_Last updated: 2026-04-24 (R3 `EePayload` message-shape builder
+_Last updated: 2026-04-24 (R3 MJCF payload **stripper** landed as
+`tests/integration/r3_payload_strip.py` + 34 unit tests — inverse of
+the splicer, closes the M6.17 swap-in-place seam. Given an MJCF
+document and a `body_name` (default `ee_payload`), removes a single
+matching `<body>` element anywhere in the tree and re-serialises via
+`ET.tostring(..., encoding="unicode")`. Idempotent: if no match is
+found the input is returned byte-identical (fast path skips the parse
+entirely when `body_name` is absent as a substring, so malformed
+baselines and the zero-mass `no_payload` input both round-trip
+losslessly). `splice → strip` recovers the semantic tree of the
+original MJCF; `strip → splice` enables an in-place payload swap
+without tripping the splicer's double-splice guard. Ambiguous matches
+(>1 body with the same name) raise rather than guessing. Pure stdlib;
+imports only `xml.etree.ElementTree` + the sibling emitter's
+`DEFAULT_BODY_NAME`. Pinned by 34 unit tests in
+`tests/unit/test_r3_payload_strip.py`: export surface, idempotence
+(no match, malformed-when-absent, empty string, double-strip),
+splice↔strip semantic round-trip, body actually removed, anchor
+preserved, siblings (`<inertial>`, `<geom>`) preserved, deeply-nested
+anchor, all three catalog payloads round-trip, zero-mass no-op,
+custom `body_name` override + textual false-positive, ambiguous-match
+error, full input-validation matrix (non-str / malformed mjcf,
+non-str / empty / whitespace `body_name`), and the in-place
+swap-payload composition (`strip → splice` with two different
+payloads). Unit gate now reports **741 passed** (up from 707).
+Full `scripts/run_tests.sh` green end-to-end: unit (741) + colcon
+test (10 packages, 22 `test_math` + 5 `test_filters` + 4
+`test_pseudo_inverse` gtests) + integration (12 launch tests ×
+{ur5e, ur15}), ~5:26 wall clock for the integration slice.
+M6.0 operator gate still active for every bullet that requires
+live sim changes.)._
+
+_Previous iteration: R3 `EePayload` message-shape builder
 landed as `tests/integration/r3_payload_ee_msg.py` + 27 unit tests —
 pre-bakes the M6.16 ROS runtime-API plumbing seam. Pure stdlib;
 exports frozen dataclass `EePayloadMessage(mass_kg,
@@ -107,7 +139,57 @@ Still missing on the pre-bake chain:
 
 ## Last completed tasks
 
-- **This iteration: R3 `EePayload` message-shape builder
+- **This iteration: R3 MJCF payload stripper (closes M6.17
+  swap-in-place seam).** Added `tests/integration/r3_payload_strip.py`
+  exporting `strip_payload_from_mjcf(mjcf, *, body_name="ee_payload")
+  -> str` plus a re-exported `DEFAULT_BODY_NAME` sentinel. Inverse of
+  `r3_payload_splice.py`: walks the MJCF for `<body
+  name="<body_name>">`, removes the single match from its parent, and
+  re-serialises via `ET.tostring(..., encoding="unicode")`. Parent
+  lookup uses a one-pass local parent-map (`{child: parent for parent
+  in root.iter() for child in parent}`) since ElementTree lacks a
+  built-in back-pointer — MJCF documents are O(thousands) of elements
+  so the map is cheap. Idempotent on inputs without the target body:
+  if `body_name` does not appear textually, the parse is skipped and
+  the input is returned byte-identical (crucial for the `no_payload`
+  zero-mass baseline, where the splicer already returns
+  byte-identical input, so `strip(splice(mjcf, no_payload)) == mjcf`
+  holds losslessly and the malformed-MJCF zero-mass-baseline
+  contract from the splicer is preserved). Ambiguous matches (more
+  than one body with the same name) raise `ValueError` — a
+  double-splice or collision is the caller's to resolve.
+  `strip → splice` composition enables an in-place payload swap
+  (updating the dashboard-published payload via the ADR-0012 §R3
+  contract without re-regenerating the MJCF from source), without
+  tripping the splicer's double-splice guard; pinned by a dedicated
+  interop test that swaps payload `p1` (1 kg @ z=0.05) for payload
+  `p2` (3 kg @ z=0.1) and reads the mass back off the resulting
+  `<inertial>`. Pure stdlib; imports only `xml.etree.ElementTree`
+  and the sibling emitter's `DEFAULT_BODY_NAME`. Pinned by 34 unit
+  tests in `tests/unit/test_r3_payload_strip.py`: export surface
+  (`__all__`, callable, default constant), idempotence matrix (no
+  match, malformed-when-absent-fast-path, empty string,
+  double-strip), splice↔strip semantic round-trip via
+  `ET.tostring`-canonicalisation, body actually removed (iterfind
+  empty post-strip), anchor (`tool0`) preserved, siblings
+  (`<inertial>` + `<geom>`) left in place, strip under deeply-nested
+  anchor (four levels), all three in-tree catalog payloads
+  (`no_payload` / `small_payload` / `large_payload`) round-trip,
+  zero-mass strict byte-identity, custom `body_name` override +
+  textual false-positive (body name appearing inside an unrelated
+  attribute must not cause a spurious strip), ambiguous-match
+  rejection (two bodies with the same name anywhere in the tree),
+  full input-validation matrix (`mjcf` non-str including `None` /
+  `int` / `float` / `bytes` / `list` / `dict`; malformed MJCF when
+  the body_name substring is present; non-str / empty /
+  whitespace-bearing `body_name` including embedded space / tab /
+  newline), and the in-place swap-payload composition. Unit gate
+  now reports **741 passed** (up from 707). Full
+  `scripts/run_tests.sh` green end-to-end: unit (741) + colcon
+  test (10 packages, 22 `test_math` + 5 `test_filters` + 4
+  `test_pseudo_inverse` gtests) + integration (12 launch tests ×
+  {ur5e, ur15}), ~5:26 wall clock for the integration slice.
+- **Prior iteration: R3 `EePayload` message-shape builder
   (pre-bakes M6.16 ROS runtime-API plumbing).** Added
   `tests/integration/r3_payload_ee_msg.py` exporting the frozen
   dataclass `EePayloadMessage(mass_kg,
@@ -597,11 +679,11 @@ Still missing on the pre-bake chain:
 
 ## Test status
 
-- Unit tests: `scripts/run_tests.sh --unit-only` — **707 passed**
-  (up from 680; +27 R3 `EePayload` message-shape builder tests).
+- Unit tests: `scripts/run_tests.sh --unit-only` — **741 passed**
+  (up from 707; +34 R3 MJCF payload stripper tests).
 - Integration tests: re-run this iteration — all **12** launch
   tests green (sim smoke + 3 crisp roles + simple_joint_impedance
-  + cartesian_motion, each × {ur5e, ur15}); ~4:48 wall clock.
+  + cartesian_motion, each × {ur5e, ur15}); ~5:26 wall clock.
 - `colcon test`: **10** packages pass (22 `test_math` gtests +
   4 `test_pseudo_inverse` + 5 `test_filters` gtests from
   `crisp_controllers`).
