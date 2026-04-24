@@ -1,0 +1,99 @@
+# Expectation table for ur15 (M6.15).
+#
+# See tests/integration/expectations/ur5e.yaml for the schema contract
+# and rationale. This file mirrors that structure with UR15 numbers.
+#
+# Values NOT to touch without an ADR / measurement update:
+#   - effort_limit_nm: mirrors third_party/ur_simulator/src/ur_sim_config/
+#     config/ur_types/ur15.yaml.
+#   - home_rad: mirrors _defaults.yaml `home_positions`.
+
+arm: ur15
+draft: true
+notes: |
+  First-principles draft. UR15 is the largest arm in our matrix (15 kg
+  payload class); effective-inertia placeholders scale roughly with
+  reach³·mass vs. UR5e and will need MJCF-extracted replacement before
+  the R2 matrix asserts on damping ratio. Tolerances mirror ur5e
+  unless a per-arm reason appears during review.
+
+joints:
+  - name: shoulder_pan_joint
+    home_rad: 0.0
+    effort_limit_nm: 500.0
+    effective_inertia_kg_m2: 25.0
+  - name: shoulder_lift_joint
+    home_rad: -1.5707963
+    effort_limit_nm: 500.0
+    effective_inertia_kg_m2: 40.0
+  - name: elbow_joint
+    home_rad: 0.0
+    effort_limit_nm: 250.0
+    effective_inertia_kg_m2: 10.0
+  - name: wrist_1_joint
+    home_rad: -1.5707963
+    effort_limit_nm: 60.0
+    effective_inertia_kg_m2: 0.30
+  - name: wrist_2_joint
+    home_rad: 0.0
+    effort_limit_nm: 60.0
+    effective_inertia_kg_m2: 0.15
+  - name: wrist_3_joint
+    home_rad: 0.0
+    effort_limit_nm: 60.0
+    effective_inertia_kg_m2: 0.05
+
+controllers:
+  joint_trajectory_controller:
+    interface: position
+    response_model: first_order_lag
+    tolerances:
+      steady_state_err_rad: 0.01
+      drift_rad_per_10s: 0.001
+      fft_peak_db_above_noise_floor: 6.0
+
+  forward_position_controller:
+    interface: position
+    response_model: first_order_lag
+    tolerances:
+      steady_state_err_rad: 0.01
+      drift_rad_per_10s: 0.001
+      fft_peak_db_above_noise_floor: 6.0
+
+  forward_velocity_controller:
+    interface: velocity
+    response_model: first_order_lag
+    tolerances:
+      steady_state_err_rad: 0.01
+      drift_rad_per_10s: 0.001
+      fft_peak_db_above_noise_floor: 6.0
+
+  forward_effort_controller:
+    interface: effort
+    response_model: open_loop_torque
+    tolerances:
+      max_runaway_rad: 0.5
+      saturation_hold_ms: 100.0
+
+  crisp_joint_impedance:
+    interface: effort
+    response_model: second_order
+    tolerances:
+      bounded_err_rad: 0.15
+      chatter_velocity_rms_rad_s: 0.05
+      damping_ratio_pct: 20.0
+
+  simple_joint_impedance:
+    interface: effort
+    response_model: second_order
+    tolerances:
+      bounded_err_rad: 0.15
+      chatter_velocity_rms_rad_s: 0.05
+      damping_ratio_pct: 20.0
+
+tcp:
+  tolerances:
+    tcp_rmse_mm: 5.0
+    tcp_peak_err_mm: 10.0
+    tcp_orientation_peak_deg: 3.0
+    tcp_steady_drift_mm_per_30s: 2.0

@@ -755,3 +755,50 @@ supersede — the design.
     the plumbing exists before the physics and UX bullets.
   - M6.19 (payload-parametrised tests) is the final bullet before
     M6.9 (submodule bump).
+
+---
+
+## ADR-0013 — R2 expectation files: pin schema, draft values (M6.15)
+
+- **Date:** 2026-04-24
+- **Status:** Accepted (structure); draft values pending operator /
+  measurement review.
+- **Context:** M6.15 calls for
+  `tests/integration/expectations/{ur5e,ur15,payloads}.yaml`, consumed
+  by the R2 matrix (M6.12–M6.14). Authoring them now in isolation
+  risks committing numerical contracts that can't be exercised until
+  M6.3/M6.5 land. Deferring authoring entirely leaves the STATUS
+  open-question "confirm tolerance values" unanswered.
+- **Decision:**
+  - **Land the schema now.** The structural contract (joint order,
+    canonical six UR joints, controller key set covering every
+    ROADMAP §M6.3 controller + crisp/simple_jimp, tolerance-key
+    vocabulary, payload-level enumeration, inertia-tensor layout)
+    is pinned by `tests/unit/test_expectations_schema.py` and
+    treated as frozen against non-ADR changes.
+  - **Author values as explicit drafts.** Each YAML carries
+    `draft: true` and a `notes:` block stating the origin of every
+    numeric value (first-principles vs. measured vs. copied from
+    the sim's ur_types file). Operator review can edit values in
+    place without churning the schema or the tests.
+  - **Cross-reference effort limits.** The schema test requires
+    `effort_limit_nm` to equal the value in
+    `third_party/ur_simulator/.../ur_types/<arm>.yaml`. Any silent
+    divergence between the MJCF ctrlrange and the R2 expectation
+    table fails at unit-test time, not at integration-test time.
+  - **Mass must be monotonic across payload levels.** The schema
+    test pins
+    `no_payload (0) < small_payload < large_payload`, so the R2
+    test "heavier payload ⇒ larger gravity-comp error" ordering
+    holds regardless of future value edits.
+- **Consequences:**
+  - M6.15 is ticked with a caveat: structure is live, numbers are
+    drafts. The STATUS open-questions list keeps "confirm
+    tolerance values" as an operator action.
+  - Future M6.12–M6.14 (R2 tests) depend on this schema but can
+    be written against the vocabulary *today* even while sim
+    bullets (M6.3/M6.5) remain blocked on M6.0.
+  - If M6.4 (claim-aware ctrl routing) ever reveals a controller
+    not in `REQUIRED_CONTROLLERS`, the schema test fails and the
+    expectation table is forced to grow in the same commit — no
+    drift.

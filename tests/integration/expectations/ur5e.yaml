@@ -1,0 +1,121 @@
+# Expectation table for ur5e (M6.15).
+#
+# Consumed by the R2 integration test matrix (M6.12–M6.14) once it
+# lands. The schema is pinned by tests/unit/test_expectations_schema.py
+# and fixed today; the numeric values below are **draft, first-principles
+# estimates pending operator / measurement review** — see `draft: true`.
+#
+# Values NOT to touch without an ADR / measurement update:
+#   - effort_limit_nm: mirrors third_party/ur_simulator/src/ur_sim_config/
+#     config/ur_types/ur5e.yaml (ground truth for the MJCF ctrlrange).
+#   - home_rad: mirrors _defaults.yaml `home_positions` so R2 stage-1
+#     tests hold the other five joints at the same pose the sim starts.
+#
+# Units:
+#   effective_inertia_kg_m2 — reflected to joint side, including
+#     actuator armature as declared in the MJCF. The value is the
+#     *diagonal* H(q)[j,j] evaluated at `home_rad`, not the
+#     configuration-independent rotor inertia. Off-diagonal coupling is
+#     ignored for the single-joint stage (the other joints are held
+#     by position mode); a separate key will carry full H(q) if
+#     the all-joints stage needs it.
+
+arm: ur5e
+draft: true
+notes: |
+  First-principles draft. Effective-inertia values below are order-of-
+  magnitude placeholders derived from UR5e rotor + link inertias at the
+  home pose; they must be replaced by MJCF-extracted H(q) diagonals
+  before the R2 matrix asserts on damping ratio. Tolerances mirror the
+  STATUS open-questions defaults (±20% ζ, ≤1e-3 rad drift, 6 dB FFT
+  peak threshold).
+
+joints:
+  - name: shoulder_pan_joint
+    home_rad: 0.0
+    effort_limit_nm: 150.0
+    effective_inertia_kg_m2: 3.4
+  - name: shoulder_lift_joint
+    home_rad: -1.5707963
+    effort_limit_nm: 150.0
+    effective_inertia_kg_m2: 8.5
+  - name: elbow_joint
+    home_rad: 0.0
+    effort_limit_nm: 150.0
+    effective_inertia_kg_m2: 2.0
+  - name: wrist_1_joint
+    home_rad: -1.5707963
+    effort_limit_nm: 28.0
+    effective_inertia_kg_m2: 0.10
+  - name: wrist_2_joint
+    home_rad: 0.0
+    effort_limit_nm: 28.0
+    effective_inertia_kg_m2: 0.05
+  - name: wrist_3_joint
+    home_rad: 0.0
+    effort_limit_nm: 28.0
+    effective_inertia_kg_m2: 0.02
+
+# Per-controller theoretical response + pass/fail tolerances. Every R2
+# test reads these and compares the measured trace against the
+# theoretical prediction computed here.
+controllers:
+  joint_trajectory_controller:
+    interface: position
+    response_model: first_order_lag
+    tolerances:
+      steady_state_err_rad: 0.01
+      drift_rad_per_10s: 0.001
+      fft_peak_db_above_noise_floor: 6.0
+
+  forward_position_controller:
+    interface: position
+    response_model: first_order_lag
+    tolerances:
+      steady_state_err_rad: 0.01
+      drift_rad_per_10s: 0.001
+      fft_peak_db_above_noise_floor: 6.0
+
+  forward_velocity_controller:
+    interface: velocity
+    response_model: first_order_lag
+    tolerances:
+      steady_state_err_rad: 0.01
+      drift_rad_per_10s: 0.001
+      fft_peak_db_above_noise_floor: 6.0
+
+  forward_effort_controller:
+    interface: effort
+    response_model: open_loop_torque
+    tolerances:
+      # Open loop — we only assert torque saturation behaviour and that
+      # no joint runs away during the ≤1 s probe window.
+      max_runaway_rad: 0.5
+      saturation_hold_ms: 100.0
+
+  crisp_joint_impedance:
+    interface: effort
+    response_model: second_order
+    # omega_n = sqrt(K / J_eff); zeta = D / (2 sqrt(K J_eff))
+    # K and D are read from bringup/config/crisp_joint_impedance.ur5e.yaml.
+    tolerances:
+      bounded_err_rad: 0.15
+      chatter_velocity_rms_rad_s: 0.05
+      damping_ratio_pct: 20.0
+
+  simple_joint_impedance:
+    interface: effort
+    response_model: second_order
+    tolerances:
+      bounded_err_rad: 0.15
+      chatter_velocity_rms_rad_s: 0.05
+      damping_ratio_pct: 20.0
+
+# TCP-level tolerances used by the R2 stage-3 (end-effector) tests.
+# Mirrors R2 text in ROADMAP.md §M6.R2.
+tcp:
+  tolerances:
+    tcp_rmse_mm: 5.0
+    tcp_peak_err_mm: 10.0
+    tcp_orientation_peak_deg: 3.0
+    tcp_steady_drift_mm_per_30s: 2.0

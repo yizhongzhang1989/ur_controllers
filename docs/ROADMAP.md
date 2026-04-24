@@ -495,13 +495,18 @@ Exit criteria for M6 (updated):
       `{ur5e, ur15} × {cartesian_motion, JTC+ik_shim,
       crisp_cartesian_impedance}`. Asserts TCP RMSE and peak error
       against the theoretical trajectory.
-- [ ] **M6.15 — Expectation files (R2 support).** Author
+- [~] **M6.15 — Expectation files (R2 support).** Author
       `tests/integration/expectations/{ur5e,ur15}.yaml` with
       per-joint effective inertia (including `armature`), rated
       torque, and per-controller theoretical-response formulas.
       `tests/integration/expectations/payloads.yaml` for R3.
       Schema pinned by a unit test under
       `tests/unit/test_expectations_schema.py`.
+      **Status:** schema + first-draft values landed (ADR-0013);
+      7 unit tests in `tests/unit/test_expectations_schema.py`
+      freeze the structure. Numeric values remain `draft: true`
+      pending operator review + MJCF `armature` extraction
+      during M6.1.
 - [ ] **M6.16 — Payload runtime API (R3 core).** Add
       `ur_sim_msgs/EePayload.msg` (mass, inertia tensor, pose).
       Sim publishes a latched `/ee_payload` on the same topic name

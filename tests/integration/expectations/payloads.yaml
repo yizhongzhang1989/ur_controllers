@@ -1,0 +1,71 @@
+# End-effector payload expectation table (M6.15 / R3).
+#
+# Every R2 integration test is parametrised over the three payloads
+# below. Mass / inertia / pose are fed into the sim's
+# `~/set_ee_payload` service (or published on the latched
+# `/ee_payload` topic) before the scenario starts and verified by the
+# test to round-trip through the dashboard widget.
+#
+# Units:
+#   mass_kg        — scalar mass of the attached body.
+#   inertia_kg_m2  — 3×3 inertia tensor at the payload's centre of
+#                    mass, in the payload's local frame.
+#   pose_in_tool0  — SE(3) pose of the payload frame relative to
+#                    `tool0`. `xyz` in metres, `rpy` in radians.
+#
+# Values NOT to touch without an ADR update — they are referenced by
+# name from the R2 integration tests.
+
+draft: true
+notes: |
+  First-principles draft. Masses chosen to bracket the intended
+  working envelope: 0 (baseline), 1 kg (typical gripper), 5 kg
+  (heavy tool; well within UR5e's 5 kg rated payload and UR15's
+  15 kg). Inertia tensors are cube-of-uniform-density approximations
+  (I = m*a²/6 for a cube of edge a = cube_root(m / density),
+  density = 1000 kg/m³ to match the dashboard's default cube
+  visualisation).
+
+payloads:
+  - name: no_payload
+    mass_kg: 0.0
+    inertia_kg_m2:
+      ixx: 0.0
+      iyy: 0.0
+      izz: 0.0
+      ixy: 0.0
+      ixz: 0.0
+      iyz: 0.0
+    pose_in_tool0:
+      xyz: [0.0, 0.0, 0.0]
+      rpy: [0.0, 0.0, 0.0]
+
+  - name: small_payload
+    mass_kg: 1.0
+    # Cube edge a ≈ 0.1 m → I = m a² / 6 ≈ 1.67e-3 kg·m².
+    inertia_kg_m2:
+      ixx: 0.00167
+      iyy: 0.00167
+      izz: 0.00167
+      ixy: 0.0
+      ixz: 0.0
+      iyz: 0.0
+    pose_in_tool0:
+      xyz: [0.0, 0.0, 0.05]
+      rpy: [0.0, 0.0, 0.0]
+
+  - name: large_payload
+    mass_kg: 5.0
+    # Cube edge a ≈ 0.171 m → I = m a² / 6 ≈ 2.44e-2 kg·m².
+    # Centre-of-mass offset 100 mm along tool-Z to exercise
+    # gravity-comp errors (see ROADMAP §R3).
+    inertia_kg_m2:
+      ixx: 0.0244
+      iyy: 0.0244
+      izz: 0.0244
+      ixy: 0.0
+      ixz: 0.0
+      iyz: 0.0
+    pose_in_tool0:
+      xyz: [0.0, 0.0, 0.1]
+      rpy: [0.0, 0.0, 0.0]
