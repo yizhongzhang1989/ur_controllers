@@ -1,6 +1,53 @@
 # Status
 
-_Last updated: 2026-04-24 (R2 **stage-1 theoretical-block builder**
+_Last updated: 2026-04-24 (R2 **stage-2 theoretical-block builder**
+landed as `tests/integration/r2_stage2_theoretical.py` + 28 unit
+tests — closes the expectations-loader → `r2_result_to_artefact`
+seam for stage-2 (both joint-space and cartesian paths). Exports
+two narrow functions,
+`theoretical_for_stage2_joint_space(stage2_tol: Stage2Tolerances) ->
+dict` and
+`theoretical_for_stage2_cartesian(stage2_tcp_tol: Stage2TcpTolerances)
+-> dict`, each emitting `{response_model, tolerances}` with the
+three / two tolerance keys the matching stage-2 harness uses.
+`response_model` is `kinematic_consistency_joint_space` /
+`kinematic_consistency_tcp` — stage-2's ROADMAP R2 text ("TCP FK of
+measured q matches the expected trajectory within tolerance / 5 mm +
+2°") has no closed-form response like stage-1's second-order block,
+so the theoretical prediction IS the commanded trajectory and what
+the artefact records is the interpretation + pass/fail tolerances.
+Strict typing: each function rejects non-matching dataclasses
+(including the other stage-2 tolerance dataclass or a bare
+dict-with-the-right-fields) with `ValueError` — silently accepting
+either would emit the wrong `response_model` / tolerance-key set.
+Pure stdlib; sibling `expectations_loader` resolved via the
+`sys.modules`-first importlib loader convention from
+`r2_stage1_theoretical.py`. Pinned by 28 unit tests in
+`tests/unit/test_r2_stage2_theoretical.py`: export surface
+(SUPPORTED_MODES = ('joint_space', 'cartesian')); happy paths for
+both modes (value equality, plain-float leaf types, custom values
+propagate, plain-dict output); argument rejection matrix for both
+modes (None, int, str, bare dict with right fields, wrong
+dataclass); two round-trips through
+`result_to_artefact(stage=2, ...)` + `write_r2_artefact` +
+`yaml.safe_load` (joint-space via `Stage2Result`, cartesian via
+`Stage2CartesianResult`); real-YAML integration matrix over
+`{ur5e, ur15}` for both paths; and a cross-arm equality check that
+pins the schema-test invariant "both arms share identical stage-2
+values" through the builder. Unit gate now reports **933 passed**
+(up from 905). Full `scripts/run_tests.sh` green end-to-end: unit
+(933) + colcon test (10 packages, 22 `test_math` + 5 `test_filters`
++ 4 `test_pseudo_inverse` gtests) + integration (12 launch tests ×
+{ur5e, ur15}), ~5:30 wall clock for the integration slice. With
+this helper in place, any future R2 stage-2 test body (M6.13 joint-
+space or M6.14 cartesian side) reduces to:
+`result = evaluate_all_joints_*(...)` →
+`theoretical = theoretical_for_stage2_{joint_space,cartesian}(arm_exp.stage2{_,tcp})` →
+`artefact = result_to_artefact(stage=2, ..., theoretical=theoretical, result=result)` →
+`write_r2_artefact(run_dir, artefact)`. Only stage-3 theoretical-
+block builder remains on the R2-theoretical pre-bake chain.)_
+
+_Previous iteration: R2 **stage-1 theoretical-block builder**
 landed as `tests/integration/r2_stage1_theoretical.py` + 52 unit
 tests — closes the expectations-loader → `r2_result_to_artefact`
 seam for stage-1. Exports a single function
@@ -230,16 +277,14 @@ harness, the stage-3 **commanded** TCP trajectory generators, the
 FK-injected adapter (`r2_tcp_from_joints.py`), the stage-1
 **commanded** joint-space generators (`r2_stage1_commands.py`), the
 stage-2 **commanded** all-joints generator (`r2_stage2_commands.py`),
-the IK-injected adapter (`r2_joints_from_tcp.py`), and now the
-**JTC goal-builder** (`r2_jtc_goal.py` — duck-types any
-`(joint_names, times, positions)`-shaped trace and emits a frozen
-`JointTrajectoryGoal` whose `points` align index-for-index with
-`joint_names`; options `time_offset_s` for implementations that reject
-`time_from_start == 0` and `skip_initial_sample` for the common case
-where the t=0 sample is already the robot's current state; rebases
-`time_from_start_s` from `times[start]` so callers whose traces do not
-start at `t=0` get a well-formed goal for free; interop-tested against
-all three trace producers and the IK adapter), M6.12 (R2 stage-1), the
+the IK-injected adapter (`r2_joints_from_tcp.py`), the
+**JTC goal-builder** (`r2_jtc_goal.py`), the **stage-1 theoretical
+block builder** (`r2_stage1_theoretical.py`), and now the **stage-2
+theoretical block builder** (`r2_stage2_theoretical.py` — narrow
+joint-space + cartesian dispatch against the
+`ArmExpectation.stage2` / `ArmExpectation.stage2_tcp` accessors,
+emitting `{response_model, tolerances}` blocks ready to thread
+through `result_to_artefact(stage=2, ...)`), M6.12 (R2 stage-1), the
 joint-space path of M6.13 (R2 stage-2), and **both** paths of M6.14
 (R2 stage-3 `cartesian_motion` via the direct TCP commanded generators
 **and** `JTC + ik_shim` via the IK adapter) can all be authored
@@ -250,10 +295,13 @@ can import `trajectory_msgs` at test-run time.
 
 Still missing on the pre-bake chain:
 
-1. The concrete FK **and** IK backends themselves — both adapters
+1. R2 stage-3 theoretical-block builder — mirrors the stage-1 /
+   stage-2 shape against `ArmExpectation.tcp_tolerances` (the
+   four TCP tolerances already pinned by the schema test).
+2. The concrete FK **and** IK backends themselves — both adapters
    deliberately keep these out of tree so the source / licensing
    decision is independent of the orchestrator wiring.
-2. M6.19 payload parametrisation across R2 stages (needs M6.16–
+3. M6.19 payload parametrisation across R2 stages (needs M6.16–
    M6.18 to land first). The validator + MJCF emitter + MJCF
    splicer + stripper + EePayload message-shape builder landed so
    far are the preflight seams those bullets will plug into; the
@@ -261,15 +309,43 @@ Still missing on the pre-bake chain:
    the `ur_sim_msgs/EePayload` vs `geometry_msgs/Inertia +
    PoseStamped` decision (M6 R3 blocker #3) can still be made
    independently.
-3. A thin ROS-side `EePayloadMessage -> ur_sim_msgs/EePayload`
+4. A thin ROS-side `EePayloadMessage -> ur_sim_msgs/EePayload`
    materialiser — by design lives outside the pre-bake chain so
    it can import `ur_sim_msgs` (and decide whether to use
    `geometry_msgs/Inertia` instead) at test-run time.
 
 ## Last completed tasks
 
-- **This iteration: R2 stage-1 theoretical-block builder (closes the
-  expectations-loader → `r2_result_to_artefact` seam for stage-1).**
+- **This iteration: R2 stage-2 theoretical-block builder (closes the
+  expectations-loader → `r2_result_to_artefact` seam for stage-2 on
+  both joint-space and cartesian paths).** Added
+  `tests/integration/r2_stage2_theoretical.py` exporting two narrow
+  functions — `theoretical_for_stage2_joint_space(stage2_tol)` and
+  `theoretical_for_stage2_cartesian(stage2_tcp_tol)` — each
+  returning `{response_model, tolerances}`. Response models pin the
+  ROADMAP R2 stage-2 semantics: `kinematic_consistency_joint_space`
+  carries `completion_tol_rad` / `peak_tracking_err_rad` /
+  `saturation_hold_ms`; `kinematic_consistency_tcp` carries
+  `position_peak_err_mm` / `orientation_peak_err_deg`. Strict
+  typing: each function rejects non-matching dataclasses (including
+  the other stage-2 tolerance dataclass or a bare dict) with
+  `ValueError`. Pure stdlib; sibling `expectations_loader` resolved
+  via the `sys.modules`-first loader from
+  `r2_stage1_theoretical.py`. Pinned by 28 unit tests in
+  `tests/unit/test_r2_stage2_theoretical.py` (export surface +
+  `SUPPORTED_MODES`; happy-path matrix for both modes including
+  plain-float/plain-dict leaves and custom-value propagation;
+  full argument rejection matrix including cross-dataclass swaps;
+  two round-trips through `result_to_artefact(stage=2, ...)` +
+  `write_r2_artefact` + `yaml.safe_load` on both
+  `Stage2Result` (joint-space) and `Stage2CartesianResult`
+  branches; real-YAML integration matrix over `{ur5e, ur15}` for
+  both paths; cross-arm equality check). Unit gate **933 passed**
+  (up from 905).
+
+- **Prior iteration: R2 stage-1 theoretical-block builder (closes
+  the expectations-loader → `r2_result_to_artefact` seam for
+  stage-1).**
   Added `tests/integration/r2_stage1_theoretical.py` exporting
   `theoretical_for_stage1(controller_exp, *, joint_exp=None,
   stiffness_k=None, damping_d=None) -> dict`. Dispatches on
@@ -878,8 +954,8 @@ Still missing on the pre-bake chain:
 
 ## Test status
 
-- Unit tests: `scripts/run_tests.sh --unit-only` — **905 passed**
-  (up from 853; +52 R2 stage-1 theoretical-block builder tests).
+- Unit tests: `scripts/run_tests.sh --unit-only` — **933 passed**
+  (up from 905; +28 R2 stage-2 theoretical-block builder tests).
 - Integration tests: re-run this iteration — all **12** launch
   tests green (sim smoke + 3 crisp roles + simple_joint_impedance
   + cartesian_motion, each × {ur5e, ur15}); ~5:00 wall clock.
