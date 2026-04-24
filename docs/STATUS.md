@@ -1,12 +1,12 @@
 # Status
 
-_Last updated: 2026-04-24 (IK-injected adapter pre-baked as
-`tests/integration/r2_joints_from_tcp.py` + 30 unit tests — folds a
-commanded `TcpTrajectory` through an injected IK callable into a
-`JointCommandTrajectory` consumable by a JTC goal-builder, mirroring
-the FK adapter and closing the last pre-bake gap on the R2 stage-3
-`JTC + ik_shim` combo. M6.0 operator gate still active for every
-bullet that requires live sim changes.)._
+_Last updated: 2026-04-24 (JTC goal-builder pre-bake landed as
+`tests/integration/r2_jtc_goal.py` + 38 unit tests — converts any of
+the three R2 commanded-trace types into a
+`trajectory_msgs/JointTrajectory`-shaped `JointTrajectoryGoal` struct,
+closing the last glue module before orchestrator test bodies can be
+written for M6.12 / M6.13 / M6.14. M6.0 operator gate still active for
+every bullet that requires live sim changes.)._
 
 ## Current milestone
 
@@ -42,21 +42,23 @@ harness, the stage-3 **commanded** TCP trajectory generators, the
 FK-injected adapter (`r2_tcp_from_joints.py`), the stage-1
 **commanded** joint-space generators (`r2_stage1_commands.py`), the
 stage-2 **commanded** all-joints generator (`r2_stage2_commands.py`),
-and now the IK-injected adapter (`r2_joints_from_tcp.py` —
-`joint_trajectory_from_tcp` folds a commanded `TcpTrajectory` through
-an injected `ik(pos, quat, q_seed) -> Sequence[float]` into a
-`JointCommandTrajectory` whose `positions` mapping is shape-compatible
-with `AllJointsCommandTrace.positions` so the same JTC goal-builder
-can consume either; seeds threaded from previous output for branch
-continuity; duck-type accepts anything TcpTrajectory-shaped so the
-two-module-identity trap doesn't bite orchestrators), M6.12 (R2
-stage-1), the joint-space path of M6.13 (R2 stage-2), and **both**
-paths of M6.14 (R2 stage-3 `cartesian_motion` via the direct TCP
-commanded generators **and** `JTC + ik_shim` via the new IK adapter)
-can all be authored end-to-end as sim-collection orchestrators — they
-just can't run until M6.5 ships **and** the operator picks concrete
-FK and IK backends (KDL / Pinocchio / MJCF-derived) to plug into the
-two adapters.
+the IK-injected adapter (`r2_joints_from_tcp.py`), and now the
+**JTC goal-builder** (`r2_jtc_goal.py` — duck-types any
+`(joint_names, times, positions)`-shaped trace and emits a frozen
+`JointTrajectoryGoal` whose `points` align index-for-index with
+`joint_names`; options `time_offset_s` for implementations that reject
+`time_from_start == 0` and `skip_initial_sample` for the common case
+where the t=0 sample is already the robot's current state; rebases
+`time_from_start_s` from `times[start]` so callers whose traces do not
+start at `t=0` get a well-formed goal for free; interop-tested against
+all three trace producers and the IK adapter), M6.12 (R2 stage-1), the
+joint-space path of M6.13 (R2 stage-2), and **both** paths of M6.14
+(R2 stage-3 `cartesian_motion` via the direct TCP commanded generators
+**and** `JTC + ik_shim` via the IK adapter) can all be authored
+end-to-end as sim-collection orchestrators — the remaining seam is a
+thin ROS-side `JointTrajectoryGoal -> FollowJointTrajectory.Goal`
+materialiser which by design lives outside the pre-bake chain so it
+can import `trajectory_msgs` at test-run time.
 
 Still missing on the pre-bake chain:
 
@@ -68,7 +70,58 @@ Still missing on the pre-bake chain:
 
 ## Last completed tasks
 
-- **This iteration: IK-injected adapter (pre-bake for M6.14 `JTC +
+- **This iteration: JTC goal-builder pre-bake (closes the
+  `(joint_names, times, positions)` → `JointTrajectoryGoal` seam).**
+  Added `tests/integration/r2_jtc_goal.py` exporting
+  `JointTrajectoryPoint`, `JointTrajectoryGoal` (both frozen
+  dataclasses), and `jtc_goal_from_trace(trace, *, time_offset_s=0.0,
+  skip_initial_sample=False)`. Duck-types the input — any object
+  exposing `joint_names`, `times`, `positions` qualifies, which covers
+  all three existing trace producers (`JointCommandTrace` from
+  stage-1 commands, `AllJointsCommandTrace` from stage-2 commands,
+  `JointCommandTrajectory` from the IK-injected adapter). Emits a
+  `JointTrajectoryGoal` whose `points` are ordered per `joint_names`
+  (column-major → row-major transpose) and whose
+  `time_from_start_s` is rebased from `times[start]` so traces that
+  don't begin at `t=0` still yield a `time_from_start >= 0` goal.
+  Options: `time_offset_s` (non-negative additive shift, for JTC
+  implementations that reject a first point at `time_from_start=0`);
+  `skip_initial_sample` (drop `times[0]`, required when the
+  commanded first sample equals the robot's current state to avoid
+  the instantaneous-jump pathology). Validates non-empty / unique
+  str `joint_names`, strictly monotonic finite `times`, that
+  `positions` is a mapping whose keys match `joint_names` exactly
+  (missing = error, extra = error — the latter prevents data from
+  silently disappearing), per-joint sample counts, finite numeric
+  positions, and the `time_offset_s` / `skip_initial_sample`
+  preconditions. Pure stdlib; no numpy, no ROS — the final
+  `JointTrajectoryGoal -> trajectory_msgs/JointTrajectory`
+  materialiser is deliberately left out of tree so it can import
+  ROS at test-run time without polluting the unit gate. Pinned by
+  38 unit tests in `tests/unit/test_r2_jtc_goal.py`: export surface,
+  both dataclasses' frozen contract, `__len__` / `duration_s`,
+  empty-goal duration, preserving joint order, time forwarding,
+  non-zero-start rebasing, `time_offset_s` additive application,
+  `skip_initial_sample` drops-and-rebases, option composition,
+  dict-order independence (positions ordered by `joint_names` not
+  insertion), list vs tuple inputs, single-sample trace, and
+  `MappingProxyType` positions transparent handling. Validation
+  matrix covers: missing attribute (raises `TypeError`), empty /
+  duplicate / non-str joint names, empty / non-monotonic / repeated
+  / non-finite / non-numeric times, missing / extra / non-mapping
+  positions, wrong sample count, non-finite / non-numeric position
+  values, negative and non-finite `time_offset_s`, and
+  `skip_initial_sample` on a single-sample trace. Interop tests
+  drive the builder from `stage1.step_command`,
+  `stage1.sine_command`, `stage2.home_to_pose_to_home_command`, and
+  `jft.joint_trajectory_from_tcp` (fed by
+  `stage3.line_trajectory`), confirming shape-identity across all
+  three trace families. Unit gate now reports **488 passed** (up
+  from 450). Full `scripts/run_tests.sh` green end-to-end: unit
+  (488) + colcon test (10 packages, 22 `test_math` + 5
+  `test_filters` + 4 `test_pseudo_inverse` gtests) + integration
+  (12 launch tests × {ur5e, ur15}), ~5 min wall clock.
+- **Prior iteration: IK-injected adapter (pre-bake for M6.14 `JTC +
   ik_shim` combo).** Added `tests/integration/r2_joints_from_tcp.py`
   exporting `IkCallable`, `JointCommandTrajectory` (frozen dataclass:
   `joint_names`, `times`, read-only `MappingProxyType` `positions`,
@@ -252,8 +305,8 @@ Still missing on the pre-bake chain:
 
 ## Test status
 
-- Unit tests: `scripts/run_tests.sh --unit-only` — **450 passed**
-  (up from 420; +30 tests pinning the IK-injected adapter).
+- Unit tests: `scripts/run_tests.sh --unit-only` — **488 passed**
+  (up from 450; +38 tests pinning the JTC goal-builder).
 - Integration tests: re-run this iteration — all **12** launch
   tests green (sim smoke + 3 crisp roles + simple_joint_impedance
   + cartesian_motion, each × {ur5e, ur15}); ~5:20 wall clock.
