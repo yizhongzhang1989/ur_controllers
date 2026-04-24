@@ -1,11 +1,13 @@
 # Status
 
-_Last updated: 2026-04-24 (docs: M6 gains R1/R2/R3 hard requirements —
-sim/real binary parity, three-stage structured test matrix with
-theoretical expectations, configurable end-effector payload with
-dashboard widget and cube visualisation. ADR-0012 addendum captures
-the design; ROADMAP gains M6.10–M6.19. Operator review pending
-before `scripts/auto_dev_loop.sh` is fired.)_
+_Last updated: 2026-04-24 (second consecutive iteration blocked on the
+M6.0 operator gate — vendoring strategy for `mujoco_ros2_control`
+unresolved. This iteration is STATUS-only and intentionally produces
+no code; by AGENTS.md §8, one more no-op iteration after this will
+trigger the "two consecutive iterations produce no commit" stop
+guard in `scripts/auto_dev_loop.sh`, handing control back to the
+operator. Prior iteration proposed M6 + ADR-0012 with R1/R2/R3 hard
+requirements.)_
 
 ## Current milestone
 
@@ -36,46 +38,55 @@ M-REAL are still deliberately not in scope — see "Blockers" below.
 
 ## Next task (agent should pick this up)
 
-**M6.0 — Operator gate.** The agent must stop on this bullet and
-surface the vendoring question for `mujoco_ros2_control` before
-doing anything else. Per AGENTS.md §7, adding a submodule (or
-choosing any of the three alternatives in ADR-0012 §Decisions-to-
-gate) is a human gate.
+**M6.0 — Operator gate (still unresolved).** This is the second
+consecutive iteration hitting this gate. Per AGENTS.md §7, adding a
+submodule (or choosing any of the three alternatives in ADR-0012
+§Decisions-to-gate) is a human gate and the agent must not guess.
 
 Until the operator resolves M6.0, every subsequent M6 bullet is
 blocked:
 
-- M6.1 (MJCF three-actuator emission) can be prototyped on
+- **M6.1** (MJCF three-actuator emission) could be prototyped on
   `third_party/ur_simulator@auto_dev` but cannot be tested
   end-to-end without the plugin patch from M6.4.
-- M6.4 (claim-aware ctrl routing) lives in the
+- **M6.4** (claim-aware ctrl routing) lives in the
   `mujoco_ros2_control` plugin whose ownership is the topic of
   M6.0.
+- **M6.10** (real-driver parity audit) is also gated: it requires
+  the operator's confirmed target `ur_robot_driver` version before
+  the agent can pin a diff that will not churn on every driver
+  release.
+- **M6.15** (expectation files, R2 support) is scoped as "draft
+  first from first principles, operator reviews tolerances". It
+  is *not* strictly blocked on M6.0, but it encodes the physical
+  contract used by the R2 test matrix (M6.12–M6.14), and those
+  tests cannot run without M6.3/M6.5 which *are* blocked on
+  M6.0. Authoring expectations in isolation now would commit
+  numerical contracts that cannot be exercised; the agent will
+  author them in the same iteration that lands the first R2 test
+  consumer, so the schema is pinned by a live test rather than a
+  dead YAML check.
 
-Because of that chain, this iteration only updates docs:
-
-- `docs/ROADMAP.md`: adds the M6 block and its nine bullets.
-- `docs/DECISIONS.md`: appends ADR-0012 (Proposed) with the
-  design, the transition rules, and three vendoring options for
-  operator selection.
-- `docs/STATUS.md`: this rewrite.
-
-No code, config, test, submodule, or launch-file changes this
-iteration. The auto-dev loop should therefore see a single commit
-touching `docs/**` only, and — if M6.0 is still unresolved on the
-next iteration — hit the "two consecutive iterations produce no
-commit" stop guard (AGENTS.md §8) once the doc update has landed.
-That is the intended behaviour.
+This iteration is STATUS-only. Per iteration instructions step 7,
+when the next highest-value task is blocked the agent updates
+STATUS with a clear blocker entry, commits only STATUS, and stops.
+That is what has happened here. If the operator has not resolved
+M6.0 by the time the next iteration runs, the outer loop's
+"two consecutive iterations produce no commit" guard
+(AGENTS.md §8) will fire on that iteration and hand control back.
 
 ## Last completed tasks
 
-- **This iteration: propose M6 and ADR-0012.** `docs/`-only
-  change; no code. Raises the `mujoco_ros2_control` vendoring
-  question as an explicit operator gate before any M6
-  implementation work.
-- **Prior iteration: blocker-only STATUS update** surfacing that
-  M4 bullet 5 and M-REAL are the only remaining ROADMAP bullets
-  and both are human-gated.
+- **This iteration: STATUS-only blocker refresh.** Second
+  consecutive iteration waiting on M6.0. No code, config, test,
+  submodule, or roadmap edit. Commit touches `docs/STATUS.md`
+  only.
+- **Prior iteration: propose M6 and ADR-0012.** `docs/`-only
+  change. Raised the `mujoco_ros2_control` vendoring question as
+  an explicit operator gate before any M6 implementation work.
+- **Iteration before that: blocker-only STATUS update** surfacing
+  that M4 bullet 5 and M-REAL are the only remaining ROADMAP
+  bullets and both are human-gated.
 - **M0 bullet `scripts/setup_env.sh` (pre-M6).** Three-stage
   wrapper (apt → rosdep → pip + pre-commit install) with
   `--dry-run` and `--no-pre-commit` flags. Pinned by 26 unit tests
@@ -113,7 +124,7 @@ That is the intended behaviour.
   (sim smoke + 3 crisp roles + our simple_joint_impedance_controller
   + `cartesian_motion_controller`, each ×{ur5e, ur15}).
 - `pre-commit run --all-files` was clean at that point; this
-  iteration only edits `docs/*.md` files, which pre-commit covers
+  iteration only edits `docs/STATUS.md`, which pre-commit covers
   via trailing-whitespace / EOL hooks — must be re-run before
   commit.
 
