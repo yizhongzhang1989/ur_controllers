@@ -1,6 +1,50 @@
 # Status
 
-_Last updated: 2026-04-25 (R2 **stage → controllers catalog** landed
+_Last updated: 2026-04-25 (**blocker-only STATUS refresh — no code
+change this iteration**). Per AGENTS.md §3 step 7: the single next
+highest-value task under the current milestone (M6) is gated on the
+**M6.0 operator decision** (vendoring strategy for
+`mujoco_ros2_control` and target `ur_robot_driver` version). The
+pre-bake chain the agent has been extending across recent iterations
+is **complete for the gated R2/R3 orchestrator**; the STATUS entry
+below (from the prior iteration) enumerates the remaining open seams
+as:
+(1) concrete FK/IK backends — deliberately kept out of tree so the
+source / licensing decision is independent of the orchestrator
+wiring;
+(2) the ROS-side `JointTrajectoryGoal → FollowJointTrajectory.Goal`
+and `EePayloadMessage → ur_sim_msgs/EePayload` materialisers — by
+design kept outside the pre-bake chain so they can import
+`trajectory_msgs` / `ur_sim_msgs` at test-run time (their pre-bake
+counterparts, `r2_jtc_goal.py` and `r3_payload_ee_msg.py`, already
+landed);
+(3) M6.19 payload parametrisation of the R2 stage bodies — needs
+M6.16–M6.18, which are themselves gated on M6.0;
+(4) a stage-3 theoretical-response extension for
+`cartesian_second_order` — deferred with the documented rationale
+that the current `tcp_trajectory_tracking` block already suffices
+for the `cartesian_motion` position-mode, the `JTC + ik_shim` path,
+and the free-space-drift tolerance on `crisp_cartesian_impedance`.
+All other in-scope M6 bullets (M6.1–M6.9, M6.16–M6.19) touch
+`third_party/ur_simulator@auto_dev` or the vendored
+`mujoco_ros2_control` plugin; M6.10 (real-driver parity audit)
+needs the operator-confirmed `ur_robot_driver` version, and M6.11
+(`robot_driver:={sim,real}` launch arg) needs the parity-audit
+target to write against. Rather than force-fit another pre-bake
+helper when every remaining open seam is either deferred-by-design
+or gated on M6.0, this iteration commits only this STATUS refresh
+(AGENTS.md §3 step 7: "if the task is blocked … update
+`docs/STATUS.md` with a clear blocker entry, commit only the
+STATUS update, and stop"). Tests gate was not re-run this
+iteration — no code changed; the prior iteration's run of
+`scripts/run_tests.sh` remains the current green baseline (unit
+1522 + colcon 10 packages + integration 12 launch tests ×
+{ur5e, ur15}). Blockers are enumerated below under "Blockers /
+open questions for operator"; operator action on M6.0 unblocks
+M6.1 onward. No submodule pointer changes, no DECISIONS.md
+additions._
+
+_Previous iteration: R2 **stage → controllers catalog** landed
 as `tests/integration/r2_stage_controllers.py` + 60 unit tests —
 closes the "live R2 orchestrator needs to enumerate which controllers
 each stage exercises" seam that the M5-analogue R2 driver would
