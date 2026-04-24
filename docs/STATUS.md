@@ -1,22 +1,30 @@
 # Status
 
-_Last updated: 2026-04-24 (R3 MJCF payload body emitter landed as
-`tests/integration/r3_payload_mjcf.py` + 34 unit tests — pre-bakes
-the MJCF-string seam of M6.17 ("attach a body with the configured
-mass / inertia / pose to `tool0`"). Pure-stdlib
-`payload_body_mjcf(payload, *, body_name="ee_payload") -> str`
-validates via the just-landed `payload_validation.validate_payload`,
-returns the empty string for zero-mass payloads (honours the
-ROADMAP-R3 "zero-mass case = no body injected" rule so the
-`no_payload` baseline leaves the MJCF byte-identical), and otherwise
-emits a `<body>` snippet carrying MuJoCo-standard `pos`, Hamilton
-`quat` (intrinsic XYZ Euler → (w, x, y, z) closed-form, verified on
-identity + X/Y/Z axis rotations + a composed r=p=π/2, y=0 case),
-and a single `<inertial>` child with `mass` + `diaginertia`. `quat`
-is used in preference to `euler` so the result is independent of
-the enclosing MJCF's `<compiler eulerseq="...">` setting. M6.0
-operator gate still active for every bullet that requires live sim
-changes.)._
+_Last updated: 2026-04-24 (R3 MJCF payload splicer landed as
+`tests/integration/r3_payload_splice.py` + 44 unit tests — pre-bakes
+the document-level seam of M6.17 that consumes the prior iteration's
+body-snippet emitter. Pure-stdlib
+`splice_payload_into_mjcf(mjcf, payload, *,
+attach_body="tool0", body_name="ee_payload") -> str` parses the
+input MJCF with `xml.etree.ElementTree`, locates the anchor body
+anywhere in the tree (`.//body[@name='tool0']`), and appends the
+emitter's `<body>` snippet as its last child. Honours the
+ROADMAP-R3 "zero-mass case = no body injected" rule as a hard
+byte-identity invariant (zero-mass path returns the input string
+without even parsing it — so the `no_payload` baseline passes
+unchanged even if the MJCF is malformed, and the R3 "compare
+`mj_fullM` before/after" golden reference is trivial for that
+level). Rejects: non-str `mjcf`, malformed XML (positive-mass
+path only), non-str / empty / whitespace `attach_body` or
+`body_name`, missing anchor, ambiguous anchor (two bodies sharing
+the same `name`), and a double-splice guard that fires if
+`body_name` is already present anywhere in the tree (sibling or
+under the anchor — caller must regenerate rather than re-splice).
+Validator errors from `payload_validation.validate_payload`
+propagate unchanged via the emitter. Interop-tested against all
+three in-tree catalog payloads (`no_payload`, `small_payload`,
+`large_payload`). M6.0 operator gate still active for every
+bullet that requires live sim changes.)._
 
 ## Current milestone
 
@@ -84,7 +92,57 @@ Still missing on the pre-bake chain:
 
 ## Last completed tasks
 
-- **This iteration: R3 MJCF payload body emitter (pre-bakes M6.17
+- **This iteration: R3 MJCF payload splicer (pre-bakes M6.17
+  document-level seam).** Added
+  `tests/integration/r3_payload_splice.py` exporting
+  `splice_payload_into_mjcf(mjcf, payload, *,
+  attach_body="tool0", body_name="ee_payload") -> str` plus the
+  `DEFAULT_ATTACH_BODY = "tool0"` constant (re-exports
+  `DEFAULT_BODY_NAME` from the emitter). Given a full MJCF document
+  string and a validated :class:`Payload`, appends the emitter's
+  `<body>` snippet as the last child of the anchor body. Zero-mass
+  payloads short-circuit before parsing — the input string is
+  returned as-is, so the `no_payload` baseline is byte-identical
+  even when the MJCF is malformed or missing the anchor. Positive-
+  mass path: parses with `xml.etree.ElementTree.fromstring`, finds
+  the anchor via `.//body[@name='<attach_body>']` (any depth),
+  enforces exactly-one match, enforces no pre-existing body with
+  `body_name` anywhere in the tree (double-splice guard covering
+  both "sibling of anchor" and "already-attached-under-anchor"
+  cases), appends the parsed snippet as the anchor's last child,
+  and serialises via `ET.tostring(root, encoding="unicode")`.
+  Attribute / element order are preserved by ElementTree (Python
+  3.8+); whitespace formatting is not byte-preserved, but MuJoCo
+  is whitespace-insensitive — callers that want byte-identity are
+  the zero-mass path, which already has it. Validator errors from
+  `payload_validation.validate_payload` propagate unchanged via
+  the emitter. Pure stdlib; imports only `xml.etree.ElementTree`
+  plus the sibling emitter / loader. Pinned by 44 unit tests in
+  `tests/unit/test_r3_payload_splice.py`: export surface
+  (`__all__`, callable, default constants), zero-mass byte-identity
+  (well-formed MJCF, MJCF with no tool0, malformed MJCF, ignored
+  `body_name`), positive-mass happy path (single `ee_payload` child
+  under `tool0`, correct `pos` / `mass`, appended AFTER a pre-
+  existing `<inertial>` sibling, siblings of the anchor untouched,
+  deeply-nested anchor at four levels, custom `attach_body`, custom
+  `body_name`, output round-trips through the XML parser, emitted
+  `quat` is unit-norm), in-tree catalog interop (all three of
+  `no_payload` / `small_payload` / `large_payload` via
+  `load_payloads()`), and the full rejection matrix: non-str
+  `mjcf` (`None`, `int`, `float`, `bytes`, `list`), malformed XML
+  (positive-mass only), non-str / empty / whitespace `attach_body`
+  (space / tab / newline / embedded space), same matrix for
+  `body_name`, missing anchor (default + custom `attach_body`),
+  ambiguous anchor (default + custom), existing `body_name` as
+  sibling, existing `body_name` under anchor, double-splice via
+  two consecutive calls, validator-error propagation for negative
+  mass, and validator-error propagation for non-diagonal inertia.
+  Unit gate now reports **640 passed** (up from 596). Full
+  `scripts/run_tests.sh` green end-to-end: unit (640) + colcon
+  test (10 packages, 22 `test_math` + 5 `test_filters` + 4
+  `test_pseudo_inverse` gtests) + integration (12 launch tests ×
+  {ur5e, ur15}), ~4:47 wall clock for the integration slice.
+- **Prior iteration: R3 MJCF payload body emitter (pre-bakes M6.17
   string-assembly seam).** Added
   `tests/integration/r3_payload_mjcf.py` exporting
   `payload_body_mjcf(payload, *, body_name="ee_payload") -> str`
@@ -470,8 +528,8 @@ Still missing on the pre-bake chain:
 
 ## Test status
 
-- Unit tests: `scripts/run_tests.sh --unit-only` — **596 passed**
-  (up from 562; +34 MJCF emitter tests).
+- Unit tests: `scripts/run_tests.sh --unit-only` — **640 passed**
+  (up from 596; +44 MJCF splicer tests).
 - Integration tests: re-run this iteration — all **12** launch
   tests green (sim smoke + 3 crisp roles + simple_joint_impedance
   + cartesian_motion, each × {ur5e, ur15}); ~4:50 wall clock.
