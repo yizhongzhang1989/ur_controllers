@@ -1,6 +1,95 @@
 # Status
 
-_Last updated: 2026-04-24 (R2 **artefact discovery helper** landed as
+_Last updated: 2026-04-24 (R2 **artefact reader** landed as
+`tests/integration/r2_read_artefact.py` + 72 unit tests — closes the
+"schema validation is the artefact reader's concern" seam the
+`r2_find_artefacts` docstring defers (module docstring, lines ~58-59:
+"No validation of the YAML schema. That is the artefact reader's
+concern (and the artefact is JSON-safe by construction per the
+writer's contract)"). Exposes one narrow function
+`read_r2_artefact(path: Path) -> R2Artefact` plus pinned
+`SCHEMA_VERSION`, `SUPPORTED_STAGES`, and `TOP_LEVEL_KEYS` constants,
+all tied verbatim to the writer's values. Parses the on-disk YAML
+with a custom `SafeLoader` subclass that **rejects duplicate mapping
+keys** (PyYAML's default keeps the last, silently dropping fields),
+and re-asserts every writer-side constraint so a hand-edited or
+corrupted file cannot silently feed the future M5-like R2 aggregator:
+exact top-level key set (order intentionally not checked — that's
+the writer's deterministic-bytes concern), `schema_version == 1`
+with `bool`-vs-`int` guard, `stage` int in `SUPPORTED_STAGES` (bool
+rejected), `arm` in `SUPPORTED_ARMS`, `payload` in `PAYLOAD_LEVELS`,
+`controller` non-empty str with no `/`, `passed` strictly `bool`
+(`int 0/1` / `"yes"` rejected), `reasons: list[str]` of non-empty
+strings with the `passed=False ⇒ non-empty` rule (writer-mirrored),
+`metadata` / `theoretical` / `measured` recursively validated for
+JSON-safeness — `Mapping` with non-empty `str` keys, `list`
+containers, leaves limited to `str|int|float|bool|None`, finite
+floats only (`.nan` / `.inf` from hand-edits raise with a path
+locator like `theoretical.omega_n: non-finite float nan`). Filename /
+content round-trip: the file's basename must equal
+`r2_run_artefact.artefact_filename(stage=..., arm=..., controller=...,
+payload=...)` — catches renames where a discovered file says one
+combination but contains another, which would otherwise silently
+mis-aggregate under a future R2 report driver. Returns the very
+same `r2_run_artefact.R2Artefact` dataclass (sibling module loaded
+via file-path `importlib` with a plain `sys.modules` key so the
+class identity is shared across the chain), with `reasons` coerced
+back to `tuple[str, ...]` so a read artefact can be fed straight
+into `write_r2_artefact` unchanged (explicit round-trip test pins
+byte-equality). Exception contract: non-`Path` → `TypeError`,
+missing path → `FileNotFoundError`, path-is-dir → `IsADirectoryError`,
+every parse/decode/schema violation → `ValueError` prefixed with
+`r2_read_artefact:` and a field locator — one error class for
+consumers to catch across the parse/schema boundary. Pure stdlib +
+PyYAML (already in-tree per the "python deps" repo memory). Pinned
+by 72 unit tests in `tests/unit/test_r2_read_artefact.py`: export
+surface (`__all__`, `SCHEMA_VERSION == 1`, `SUPPORTED_STAGES ==
+(1,2,3)`, `TOP_LEVEL_KEYS` pinned verbatim, class-identity check
+`type(read) is RA.R2Artefact`); happy-path round-trip matrix (3
+stages × 2 arms × 3 payloads = 18 combos via pytest parametrisation,
+each asserting all eight primary fields echo); failed-artefact
+with reasons; passed-with-reasons (writer permits, reader must too);
+read-then-write byte-equality; underscore-heavy controller name
+(`crisp_cartesian_impedance` stage-3); path validation (non-Path →
+`TypeError`, missing → `FileNotFoundError`, dir → `IsADirectoryError`);
+YAML parse validation (empty file, null document, malformed YAML,
+non-UTF-8, non-mapping top level, duplicate mapping key); structural
+validation (missing top-level key, extra top-level key, top-level
+order not required); per-field validation (schema_version wrong /
+non-int / bool; stage out-of-range / non-int / bool; arm unknown /
+non-str; payload unknown / non-str; controller empty / contains `/` /
+non-str; passed non-bool int / str; reasons not-list / non-str entry /
+empty-str entry / empty-when-failed); nested JSON-safeness
+(theoretical / measured / metadata not-mapping; nested `.nan` in
+theoretical / `.inf` in measured / non-finite in a list; non-str
+metadata key; empty-str metadata key; deep-nested finite-floats-
+and-JSON-safe-leaves happy path); filename / content round-trip
+(renamed file rejected, underscore-heavy name passes); corruption
+edge sanity (writer rejects NaN up front; read is a pure function
+— `a == b` but `a.metadata is not b.metadata`); and a large
+end-to-end 18-combo round-trip that writes, reads, rewrites, and
+asserts byte-identical output across two runs of the same logical
+artefact. Unit gate now reports **1320 passed** (up from 1248). Full
+`scripts/run_tests.sh` green end-to-end: unit (1320) + colcon test
+(10 packages, 22 `test_math` + 5 `test_filters` + 4 `test_pseudo_inverse`
+gtests) + integration (12 launch tests × {ur5e, ur15}, 301.82s).
+With this helper in place, the future R2 aggregation / reporting
+driver (analogous to M5's `compare.py` but over R2 artefacts)
+reduces to: `for loc in find_r2_artefacts(run_dir, **filters): art =
+read_r2_artefact(loc.path); ...` — one call instead of
+`yaml.safe_load` + open-coded schema checks at every consumer. The
+pre-bake chain's only remaining open seams are the concrete FK/IK
+backends (deliberately kept out of tree so the source / licensing
+decision is independent of the orchestrator wiring), the ROS-side
+`JointTrajectoryGoal → FollowJointTrajectory.Goal` and
+`EePayloadMessage → ur_sim_msgs/EePayload` materialisers (by design
+kept outside the pre-bake chain so they can import
+`trajectory_msgs` / `ur_sim_msgs` at test-run time), and M6.19
+payload-parametrisation of the R2 stage bodies (needs M6.16–M6.18
+to land first, which are gated on M6.0). M6.0 operator gate
+remains active for every bullet that touches the live sim._
+
+_Previous iteration: R2 **artefact discovery helper** landed as
 `tests/integration/r2_find_artefacts.py` + 39 unit tests — closes the
 "M5 comparison driver can glob for R2 artefacts" seam the
 `r2_run_artefact` writer docstring pins (module docstring, line ~25:
