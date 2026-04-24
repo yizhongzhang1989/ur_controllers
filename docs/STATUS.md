@@ -1,8 +1,9 @@
 # Status
 
-_Last updated: 2026-04-24 (stage-2 evaluator gets an ArmExpectation-driven
-convenience wrapper — `evaluate_all_joints_from_expectation` collapses
-orchestrator boilerplate. M6.0 operator gate still active for every
+_Last updated: 2026-04-24 (R2 stage-3 TCP assertion harness pre-baked
+as `tests/integration/r2_stage3_assertions.py` + 20 unit tests — the
+pure-math half of M6.14 lands ahead of the FK-source decision, which
+only gates the orchestrator. M6.0 operator gate still active for every
 bullet that requires live sim changes)._
 
 ## Current milestone
@@ -32,30 +33,56 @@ Still gated on **M6.0** (vendoring strategy for
 
 With M6.15's schema live plus the loader, theoretical helpers,
 measured-signal helpers, stage-1 assertion harness, stage-2
-joint-space harness (settle-window support + the new
-`evaluate_all_joints_from_expectation` wrapper that pulls
-`stage2` tolerances and per-joint `effort_limit_nm` straight
-from an `ArmExpectation`), per-arm stage-2 tolerance block wired
-through the loader, M6.12 (R2 stage-1) and the joint-space path
-of M6.13 (R2 stage-2) can both be authored end-to-end as
-sim-collection orchestrators — they just can't run until M6.5
-ships. The orchestrator should pass its probe's settle-window
-length (from the scenario definition) directly as
-`settle_window_s` into
-`evaluate_all_joints_from_expectation`; one call per controller
-handles the tolerances + effort limits and returns a
-`Stage2Result` with full per-joint diagnostics. Still missing on
-the pre-bake chain:
+joint-space harness (settle-window support + the
+`evaluate_all_joints_from_expectation` wrapper), per-arm stage-2
+tolerance block wired through the loader, and now the stage-3
+TCP assertion harness (`r2_stage3_assertions.py` with
+`evaluate_tcp_trajectory` + `evaluate_tcp_trajectory_from_expectation`
+sourcing `tcp.tolerances` straight from `ArmExpectation`), M6.12
+(R2 stage-1), the joint-space path of M6.13 (R2 stage-2), and
+the assertion side of M6.14 (R2 stage-3) can all be authored
+end-to-end as sim-collection orchestrators — they just can't
+run until M6.5 ships. The stage-3 harness uses per-axis
+roll/pitch/yaw peak error (to match ROADMAP R2 wording
+literally) and a two-half-means drift proxy gated to
+`steady_window_s >= 30 s` (no linear extrapolation from shorter
+windows). Still missing on the pre-bake chain:
 
-1. M6.13 cartesian-mode / FK-based kinematic-consistency branch
-   (needs a UR FK module; source and licensing to be agreed).
-2. M6.14 (R2 stage-3, TCP trajectory): also blocked on FK.
-3. M6.19 payload parametrisation across R2 stages (needs M6.16–
+1. M6.13 / M6.14 FK module itself — needed by the orchestrators
+   that feed the stage-2 cartesian branch and the stage-3
+   harness (source and licensing to be agreed).
+2. M6.19 payload parametrisation across R2 stages (needs M6.16–
    M6.18 to land first).
 
 ## Last completed tasks
 
-- **This iteration: stage-2 evaluator ArmExpectation wrapper.**
+- **This iteration: R2 stage-3 TCP assertion harness.** Added
+  `tests/integration/r2_stage3_assertions.py` with
+  `evaluate_tcp_trajectory(...)` (position RMSE + peak, per-axis
+  RPY peak orientation error, optional two-half-means steady
+  drift gated to `steady_window_s >= 30 s`) and the
+  expectation-driven wrapper
+  `evaluate_tcp_trajectory_from_expectation(arm, controller,
+  ...)` that sources the four `tcp.tolerances` keys from
+  `ArmExpectation.tcp_tolerances`. Pure stdlib (Hamilton
+  quaternion multiply + tf2-convention RPY decomposition),
+  antipodal-pair handling (`q` and `-q` report zero rotation),
+  tolerant normalization (reject only degenerate norms outside
+  [0.5, 1.5]). Returns a typed `TcpStage3Result` with `.ok`,
+  `.failures`, `.notes`, `.format()` — same surface as stage-1 /
+  stage-2. Pinned by 20 unit tests in
+  `tests/unit/test_r2_stage3_assertions.py`: happy path, per-
+  tolerance failures (RMSE, peak, orientation, drift), antipodal
+  and non-unit quaternion handling, drift-check passing /
+  failing / skipped-short-window / skipped-tolerance-none,
+  validation (non-monotonic times, length mismatch, negative
+  window, oversized window), the expectation-driven wrapper on
+  both arms, and result formatting. Unit gate now reports
+  **305 passed** (up from 285). Full `scripts/run_tests.sh`
+  green end-to-end: unit (305) + colcon test (10 packages,
+  22 `test_math` + 5 `test_filters` gtests) + integration
+  (12 launch tests × {ur5e, ur15}), ~5:00 wall clock.
+- **Prior iteration: stage-2 evaluator ArmExpectation wrapper.**
   Added `evaluate_all_joints_from_expectation(arm, controller,
   ...)` to `tests/integration/r2_stage2_assertions.py`. The
   wrapper forwards to `evaluate_all_joints_joint_space` after
@@ -129,11 +156,11 @@ the pre-bake chain:
 
 ## Test status
 
-- Unit tests: `scripts/run_tests.sh --unit-only` — **285 passed**
-  (up from 278; +7 tests pinning the new wrapper).
+- Unit tests: `scripts/run_tests.sh --unit-only` — **305 passed**
+  (up from 285; +20 tests pinning the new stage-3 harness).
 - Integration tests: re-run this iteration — all **12** launch
   tests green (sim smoke + 3 crisp roles + simple_joint_impedance
-  + cartesian_motion, each × {ur5e, ur15}); ~4:53 wall clock.
+  + cartesian_motion, each × {ur5e, ur15}); ~4:57 wall clock.
 - `colcon test`: **10** packages pass (22 `test_math` gtests +
   5 `crisp_controllers` gtests).
 - `pre-commit run --files <changed>`: clean (trim trailing
