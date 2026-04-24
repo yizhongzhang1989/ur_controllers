@@ -1,6 +1,95 @@
 # Status
 
-_Last updated: 2026-04-24 (R2 **run-report writer** landed as
+_Last updated: 2026-04-24 (R2 **bulk results writer** landed as
+`tests/integration/r2_write_results.py` + 38 unit tests — closes the
+"live orchestrator has a batch of stage results + per-combo context
+and needs to deposit them as YAML artefacts in one R2 run directory"
+seam that the previous iteration's aggregator / report-writer chain
+left open at the **input** end (`r2_report_writer` closed the output
+end). Exposes one frozen dataclass `R2ResultEntry(stage, arm,
+controller, payload, theoretical, result, metadata=None)` mirroring
+the keyword shape of `r2_result_to_artefact.result_to_artefact`,
+plus two functions: `write_r2_result(run_dir, entry, *,
+overwrite=False) -> Path` (single-entry shim) and
+`write_r2_results(run_dir, entries, *, overwrite=False) ->
+Tuple[Path, ...]` (bulk driver over `list | tuple` of entries,
+returning written paths in input order so a caller can `zip` back
+against the input). Bulk driver runs a **bridge pass first, then a
+write pass**: every entry is converted to `R2Artefact` via
+`result_to_artefact` **before** any file I/O, so a mid-batch
+stage/result mismatch (or controller-echo mismatch, or reserved-
+metadata clash) aborts the call with no on-disk side effect — the
+"never half-write" contract the single-artefact writer pins extends
+cleanly to the batch. Duplicate-combo guard runs ahead of the bridge
+pass: two entries sharing the same `(stage, arm, controller,
+payload)` 4-tuple raise `ValueError` locating both `entries[i]` /
+`entries[j]` indices, avoiding the filesystem's later muddier
+`FileExistsError`. Same combo across different stages is allowed
+(stage differs ⇒ filename differs ⇒ no collision). Overwrite
+semantics are delegated to `write_r2_artefact` per-entry. Sibling
+modules loaded via file-path `importlib` with plain module-name
+keys (matching the `r2_result_to_artefact` / `r2_aggregate` /
+`r2_report_writer` convention — see the "module loading" repo
+memory), so an `R2ResultEntry` whose `result` was built against the
+direct-loaded stage modules shares class identity with the bridge's
+internal `isinstance` checks (pinned by a dedicated
+`WR._artefact_mod.R2Artefact is RA.R2Artefact` test). Error prefix
+is `r2_write_results:` for the direct layer (non-`Path` `run_dir`,
+non-`R2ResultEntry` entry, non-list/tuple `entries`, non-bool
+`overwrite`, duplicate combo); bridge errors keep their
+`r2_result_to_artefact:` prefix; writer errors keep their
+`r2_run_artefact:` prefix — a caller grep-ing a stack trace can tell
+which layer rejected them. Pure stdlib in this module; PyYAML is
+pulled in transitively by the writer. Pinned by 38 unit tests in
+`tests/unit/test_r2_write_results.py`: export surface (`__all__`,
+`R2ResultEntry` frozen + default-metadata-is-None, class-identity
+check against `r2_run_artefact.R2Artefact`); single-entry type
+validation (non-Path `run_dir`, None `run_dir`, non-entry as 4-case
+parametrise, non-bool `overwrite`); single-entry happy path for all
+four stage result types (Stage1Result, Stage2Result joint-space +
+per-joint flattening round-trip through reader, Stage2CartesianResult,
+TcpStage3Result with notes → `metadata.stage3_notes`); failing-result
+reasons carry-through; `run_dir` auto-creation at depth; error
+propagation (bridge stage/result mismatch leaves `run_dir` empty,
+controller echo mismatch, pre-existing file without
+`overwrite=True` → `FileExistsError`, `overwrite=True` replaces);
+bulk-driver type validation (non-Path `run_dir`, non-sequence
+`entries` as 4-case parametrise including a generator, non-entry
+element with index locator, non-bool `overwrite`); duplicate-combo
+rejection (both indices in message, no file written); same-combo-
+across-stages allowed (filename differs); empty batch returns `()`;
+5-entry full-stage-coverage happy path with per-entry
+`artefact_filename` match and input-ordering check; tuple input
+accepted; bridge failure in batch aborts before any write;
+pre-existing collision in batch aborts without landing new files
+beyond the target set; `overwrite=True` allows reruns; end-to-end
+chain through `r2_find_artefacts` / `r2_read_artefact` /
+`aggregate_r2_run` with mixed pass/fail producing the expected
+tallies (`by_stage`, `by_arm`); single-entry round-trip through
+reader echoing all four primary keys. Unit gate now reports **1462
+passed** (up from 1424). Full `scripts/run_tests.sh` green
+end-to-end: unit (1462) + colcon test (10 packages, 22 `test_math`
++ 5 `test_filters` + 4 `test_pseudo_inverse` gtests) + integration
+(12 launch tests × {ur5e, ur15}, 333.70s). With this helper in
+place, the future live R2 orchestrator (M5-analogue) reduces to:
+spin sim per combo, drive the R2 harness, collect results into a
+list of `R2ResultEntry`, then call `write_r2_results(run_dir,
+entries)` + `aggregate_r2_run(run_dir)` + `write_r2_reports(
+report_dir, summary)` — **no more open-coded bridge/write loops at
+the consumer, no more filename arithmetic, no more half-write
+risk**. The pre-bake chain's only remaining open seams are the
+concrete FK/IK backends (deliberately kept out of tree so the
+source / licensing decision is independent of the orchestrator
+wiring), the ROS-side `JointTrajectoryGoal →
+FollowJointTrajectory.Goal` and `EePayloadMessage →
+ur_sim_msgs/EePayload` materialisers (by design kept outside the
+pre-bake chain so they can import `trajectory_msgs` /
+`ur_sim_msgs` at test-run time), and M6.19 payload-parametrisation
+of the R2 stage bodies (needs M6.16–M6.18 to land first, which are
+gated on M6.0). M6.0 operator gate remains active for every bullet
+that touches the live sim._
+
+_Previous iteration: R2 **run-report writer** landed as
 `tests/integration/r2_report_writer.py` + 54 unit tests — closes the
 "future R2 CSV / Markdown report writer over `R2RunSummary`
 (analogous to M5's `evaluation/compare.py::render_report`)" seam
