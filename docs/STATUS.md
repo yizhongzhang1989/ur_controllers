@@ -1,11 +1,13 @@
 # Status
 
-_Last updated: 2026-04-24 (R2 stage-3 commanded TCP trajectory
-generators pre-baked as `tests/integration/r2_stage3_commands.py` +
-30 unit tests — line / arc / sine-in-z emitters feed the stage-3
-assertion harness directly, still ahead of the FK-source decision.
-M6.0 operator gate still active for every bullet that requires live
-sim changes)._
+_Last updated: 2026-04-24 (FK-injected TCP adapter pre-baked as
+`tests/integration/r2_tcp_from_joints.py` + 26 unit tests — turns
+measured joint-state samples into a `TcpTrajectory` via an injected
+`fk` callable, closing the last purely-stdlib gap between stage-3's
+commanded side and assertion side. M6.0 operator gate still active
+for every bullet that requires live sim changes; the FK source /
+licensing decision remains the only other non-sim gate on the
+pre-bake chain.)._
 
 ## Current milestone
 
@@ -37,61 +39,79 @@ measured-signal helpers, stage-1 assertion harness, stage-2
 joint-space harness (settle-window support + the
 `evaluate_all_joints_from_expectation` wrapper), per-arm stage-2
 tolerance block wired through the loader, the stage-3 TCP assertion
-harness, and now the stage-3 **commanded** TCP trajectory generators
-(`r2_stage3_commands.py` with `line_trajectory`, `arc_trajectory`,
-`sine_in_z_trajectory` returning a typed `TcpTrajectory` whose
-`(times, positions, orientations)` fields plug straight into
-`evaluate_tcp_trajectory`), M6.12 (R2 stage-1), the joint-space path
+harness, the stage-3 **commanded** TCP trajectory generators, and
+now the **FK-injected adapter** (`r2_tcp_from_joints.py` —
+`tcp_trajectory_from_joints(times, joint_samples, fk) ->
+TcpTrajectory`, closes over `arm` inside the `fk` callable, rebases
+input `times` to `t0=0` so the `TcpTrajectory` invariant holds, and
+wraps `fk` exceptions with `sample index + absolute timestamp` for
+long-trace debuggability), M6.12 (R2 stage-1), the joint-space path
 of M6.13 (R2 stage-2), and the assertion side of M6.14 (R2 stage-3)
-can all be authored end-to-end as sim-collection orchestrators —
-they just can't run until M6.5 ships. The commanded-trajectory
-generators are pure stdlib, validate quaternion norm in the same
-[0.5, 1.5] band the assertion harness uses, and normalise returned
-quats so downstream consumers get unit rotations unconditionally.
+can all be authored end-to-end as sim-collection orchestrators — they
+just can't run until M6.5 ships **and** the operator picks a concrete
+FK backend (KDL / Pinocchio / MJCF-derived) to plug into the adapter.
 Still missing on the pre-bake chain:
 
-1. M6.13 / M6.14 FK module itself — needed by the orchestrators
-   that feed the stage-2 cartesian branch and the stage-3
-   harness (source and licensing to be agreed).
+1. The concrete FK backend itself — the adapter deliberately
+   keeps this out of tree so the source / licensing decision is
+   independent of the orchestrator wiring.
 2. M6.19 payload parametrisation across R2 stages (needs M6.16–
    M6.18 to land first).
 
 ## Last completed tasks
 
-- **This iteration: R2 stage-3 commanded TCP trajectory generators.**
+- **This iteration: FK-injected TCP adapter (pre-bake glue for R2
+  stage-2 cartesian consistency + R2 stage-3 measured side).**
+  Added `tests/integration/r2_tcp_from_joints.py` exporting
+  `tcp_trajectory_from_joints(times, joint_samples, fk) ->
+  TcpTrajectory`. The adapter takes an injected FK callable
+  (`fk(q) -> (pos_xyz_m, quat_xyzw)`; any arm / kinematic-model
+  selection the backend needs is closed over by the caller) and
+  folds a measured joint-state stream into the same frozen
+  `TcpTrajectory` dataclass that `r2_stage3_commands` emits and
+  `evaluate_tcp_trajectory` consumes. Times are **rebased to
+  `t0=0`** inside the adapter so the `TcpTrajectory` invariant
+  `times[0] == 0.0` holds regardless of whether the caller's
+  `/joint_states` trace started at wall-clock zero. Validates
+  length match, strict monotonicity + finiteness of `times`,
+  joint-sample dim consistency + finiteness, FK output shape
+  (3-float pos / 4-float quat), FK output finiteness, and
+  quaternion norm in the same `[0.5, 1.5]` band the stage-3
+  modules already use — returned quats are unit-normalised so
+  downstream consumers never have to re-normalise. FK exceptions
+  are re-raised as `ValueError` carrying the sample index and the
+  **absolute** (pre-rebase) timestamp, so a long-trace failure
+  maps straight back to the raw joint-state log. Deliberately
+  does **not** cover commanded/measured time alignment — that
+  stays with the orchestrator so the adapter owns exactly one
+  concern. Pure stdlib, loads the sibling `TcpTrajectory` via the
+  file-based importlib pattern already used by
+  `r2_stage2_assertions`. Pinned by 26 unit tests in
+  `tests/unit/test_r2_tcp_from_joints.py`: happy path (returns
+  `TcpTrajectory`, rebases times, forwards FK pos, unit-normalises
+  FK quats, accepts numpy-ish `__float__`-coercible inputs),
+  end-to-end interop with `r2_stage3_assertions.evaluate_tcp_trajectory`
+  (feed adapter output as both commanded and measured -> zero
+  RMSE / peak / orientation error, `result.ok == True`), input
+  validation (length mismatch, empty / single-sample input,
+  non-monotonic + duplicate + non-finite times, inconsistent
+  joint-vector dim, empty joint vector, non-finite + non-numeric
+  joint values), FK-output validation (exception wrapping with
+  sample index + timestamp + original message, wrong pos length,
+  wrong quat length, wrong overall shape, non-finite pos, non-finite
+  quat, zero quat, oversize quat outside the `[0.5, 1.5]` band),
+  and export surface (`__all__` lists `FkCallable`, `TcpTrajectory`,
+  `tcp_trajectory_from_joints`; `TcpTrajectory` dataclass fields
+  match the sibling one-for-one; `duration_s` is a property on
+  both). Unit gate now reports **361 passed** (up from 335).
+  Full `scripts/run_tests.sh` green end-to-end: unit (361) +
+  colcon test (10 packages, 22 `test_math` + 5 `test_filters` +
+  4 `test_pseudo_inverse` gtests) + integration (12 launch tests
+  × {ur5e, ur15}), ~5 min wall clock.
+- **Prior iteration: R2 stage-3 commanded TCP trajectory generators.**
   Added `tests/integration/r2_stage3_commands.py` exporting
-  `TcpTrajectory` (frozen dataclass carrying `times`, `positions`,
-  `orientations` as parallel tuples) and three generators matching
-  the ROADMAP R2 stage-3 shapes verbatim: `line_trajectory` (constant
-  linear velocity, linear interpolation), `arc_trajectory` (planar
-  circular arc in any of `xy` / `xz` / `yz` at constant angular
-  rate, out-of-plane coord held at the centre), and
-  `sine_in_z_trajectory` (`z(t) = base.z + A sin(2π f t + φ)` with
-  `x`/`y` held). Each generator accepts an optional
-  `orientation_quat` (defaults to identity), validates quaternion
-  norm against the same [0.5, 1.5] band the stage-3 assertion
-  harness uses, and returns unit quats regardless of input norm so
-  downstream consumers never have to re-normalise. Timing is
-  validated (finite, strictly positive, `dt_s <= duration_s`) and
-  `times[-1]` is pinned to the requested `duration_s` exactly so a
-  future orchestrator can splice multiple trajectories without
-  endpoint drift. Pure stdlib. Pinned by 30 unit tests in
-  `tests/unit/test_r2_stage3_commands.py`: sample count and
-  endpoints, monotonic times, linear interpolation midpoint, quat
-  normalisation, default-identity orientation, bad timing rejection
-  (zero / negative / NaN / dt > duration), non-finite positions,
-  degenerate quaternions, arc radius preservation in plane, all
-  three planes, bad radius / unknown plane / non-finite angle
-  rejection, sine amplitude bounds, zero-phase and π/2-phase
-  behaviour, bad frequency / non-finite amplitude rejection,
-  end-to-end compatibility with `evaluate_tcp_trajectory` (feeding
-  the generated trajectory as both commanded and measured yields
-  zero RMSE / peak / orientation error), dataclass immutability,
-  and the `duration_s` property. Unit gate now reports **335
-  passed** (up from 305). Full `scripts/run_tests.sh` green
-  end-to-end: unit (335) + colcon test (10 packages, 22 `test_math`
-  + 5 `test_filters` gtests) + integration (12 launch tests ×
-  {ur5e, ur15}), ~5:00 wall clock.
+  `TcpTrajectory` + `line_trajectory` / `arc_trajectory` /
+  `sine_in_z_trajectory`, pinned by 30 unit tests.
 - **Prior iteration: R2 stage-3 TCP assertion harness.** Added
   `tests/integration/r2_stage3_assertions.py` with
   `evaluate_tcp_trajectory(...)` (position RMSE + peak, per-axis
@@ -175,14 +195,14 @@ Still missing on the pre-bake chain:
 
 ## Test status
 
-- Unit tests: `scripts/run_tests.sh --unit-only` — **335 passed**
-  (up from 305; +30 tests pinning the new commanded-trajectory
-  generators).
+- Unit tests: `scripts/run_tests.sh --unit-only` — **361 passed**
+  (up from 335; +26 tests pinning the FK-injected TCP adapter).
 - Integration tests: re-run this iteration — all **12** launch
   tests green (sim smoke + 3 crisp roles + simple_joint_impedance
-  + cartesian_motion, each × {ur5e, ur15}); ~4:57 wall clock.
+  + cartesian_motion, each × {ur5e, ur15}); ~4:54 wall clock.
 - `colcon test`: **10** packages pass (22 `test_math` gtests +
-  5 `crisp_controllers` gtests).
+  4 `test_pseudo_inverse` + 5 `test_filters` gtests from
+  `crisp_controllers`).
 - `pre-commit run --files <changed>`: clean (trim trailing
   whitespace, EOL fixer, ruff, ruff-format).
 
