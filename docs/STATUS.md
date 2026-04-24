@@ -1,6 +1,56 @@
 # Status
 
-_Last updated: 2026-04-24 (R2 **result → artefact bridge** landed as
+_Last updated: 2026-04-24 (R2 **stage-1 theoretical-block builder**
+landed as `tests/integration/r2_stage1_theoretical.py` + 52 unit
+tests — closes the expectations-loader → `r2_result_to_artefact`
+seam for stage-1. Exports a single function
+`theoretical_for_stage1(controller_exp, *, joint_exp=None,
+stiffness_k=None, damping_d=None) -> dict` that dispatches on
+`controller_exp.response_model`: `first_order_lag` (JTC,
+`forward_position`, `forward_velocity`) and `open_loop_torque`
+(`forward_effort_controller`) return `{response_model, interface,
+tolerances}` with the three / two tolerance keys each YAML row
+requires; `second_order` (`crisp_joint_impedance`,
+`simple_joint_impedance`) additionally computes `omega_n_rad_s` and
+`zeta` via `expectations_loader.second_order_response(K, D, J_eff)`
+and returns them alongside the echoed K / D / J / joint name under a
+`response` sub-block. `joint_exp` / `stiffness_k` / `damping_d` are
+strictly rejected for the non-second-order branches (a silently
+ignored K/D is almost always a test-authoring bug). K/D are
+caller-supplied — this module stays decoupled from
+`bringup/config/*.yaml`, matching the posture of
+`expectations_loader.second_order_response`. Output is a plain
+`dict` with string keys and finite-float / string leaves, ready to
+hand straight to `r2_result_to_artefact.result_to_artefact(...,
+theoretical=...)`. Pure stdlib; sibling `expectations_loader`
+resolved via a `sys.modules`-first importlib loader matching the
+convention in `r2_result_to_artefact.py`. Pinned by 52 unit tests
+in `tests/unit/test_r2_stage1_theoretical.py`: export surface;
+happy paths for all three response models (including tolerances-
+are-plain-floats, interface-propagation, int-to-float coercion of
+K/D, overdamped ζ≥1 branch, zero-damping branch); extraneous-kwarg
+rejection matrix for first-order + open-loop; missing-required-kwarg
+matrix for second-order; loader delegation for K≤0 / D<0 validation
+errors; missing-tolerance-key bubbling of the loader's native
+`KeyError`; unknown-response-model rejection; type rejection
+matrix for `controller_exp` / `joint_exp` / non-numeric K / D;
+three round-trip tests through `result_to_artefact` +
+`write_r2_artefact` + `yaml.safe_load` for the three response
+models; and a real-YAML integration matrix over {ur5e, ur15} × {JTC,
+forward_position, forward_velocity, forward_effort} +
+{crisp_joint_impedance, simple_joint_impedance}. Unit gate now
+reports **905 passed** (up from 853). Full `scripts/run_tests.sh`
+green end-to-end: unit (905) + colcon test (10 packages, 22
+`test_math` + 5 `test_filters` + 4 `test_pseudo_inverse` gtests) +
+integration (12 launch tests × {ur5e, ur15}), ~5:00 wall clock for
+the integration slice. With this helper in place, any future R2
+stage-1 test body reduces to:
+`result = evaluate_*(c, ...)` →
+`theoretical = theoretical_for_stage1(c, joint_exp=j, stiffness_k=K, damping_d=D)` →
+`artefact = result_to_artefact(stage=1, ..., theoretical=theoretical, result=result)` →
+`write_r2_artefact(run_dir, artefact)`.)_
+
+_Previous iteration: R2 **result → artefact bridge** landed as
 `tests/integration/r2_result_to_artefact.py` + 57 unit tests — closes
 the last remaining seam between the four stage assertion harnesses
 and the `R2Artefact` writer. Exports a single function
@@ -218,7 +268,34 @@ Still missing on the pre-bake chain:
 
 ## Last completed tasks
 
-- **This iteration: R2 result → artefact bridge (closes the last
+- **This iteration: R2 stage-1 theoretical-block builder (closes the
+  expectations-loader → `r2_result_to_artefact` seam for stage-1).**
+  Added `tests/integration/r2_stage1_theoretical.py` exporting
+  `theoretical_for_stage1(controller_exp, *, joint_exp=None,
+  stiffness_k=None, damping_d=None) -> dict`. Dispatches on
+  `controller_exp.response_model`: `first_order_lag` and
+  `open_loop_torque` return `{response_model, interface, tolerances}`
+  from the controller's tolerance row; `second_order` additionally
+  computes `omega_n_rad_s`/`zeta` via
+  `expectations_loader.second_order_response(K, D, J_eff)` and
+  echoes K / D / J / joint name under a `response` sub-block. Strict
+  kwarg matching: extraneous `joint_exp`/`stiffness_k`/`damping_d`
+  for non-second-order controllers raises (silent K/D ignore is a
+  test-authoring trap). K/D remain caller-supplied, keeping this
+  module decoupled from `bringup/config/*.yaml`. Pure stdlib; sibling
+  loader uses the `sys.modules`-first convention from
+  `r2_result_to_artefact.py`. Pinned by 52 unit tests in
+  `tests/unit/test_r2_stage1_theoretical.py` (export surface;
+  happy-path matrix for all three response models; extraneous-kwarg
+  rejection; missing-required-kwarg rejection for second-order;
+  delegation to the loader for K≤0 / D<0; missing-tolerance-key
+  bubbling of the loader's `KeyError`; unknown-response-model path;
+  type rejection matrix; three round-trips through
+  `result_to_artefact` + `write_r2_artefact` + `yaml.safe_load`; and
+  a real-YAML integration matrix over {ur5e, ur15} × all six known
+  stage-1 controllers). Unit gate **905 passed** (up from 853).
+
+- **Prior iteration: R2 result → artefact bridge (closes the last
   stage-harness → writer seam).** Added
   `tests/integration/r2_result_to_artefact.py` exporting a single
   function `result_to_artefact(*, stage, arm, controller, payload,
@@ -801,11 +878,11 @@ Still missing on the pre-bake chain:
 
 ## Test status
 
-- Unit tests: `scripts/run_tests.sh --unit-only` — **741 passed**
-  (up from 707; +34 R3 MJCF payload stripper tests).
+- Unit tests: `scripts/run_tests.sh --unit-only` — **905 passed**
+  (up from 853; +52 R2 stage-1 theoretical-block builder tests).
 - Integration tests: re-run this iteration — all **12** launch
   tests green (sim smoke + 3 crisp roles + simple_joint_impedance
-  + cartesian_motion, each × {ur5e, ur15}); ~5:26 wall clock.
+  + cartesian_motion, each × {ur5e, ur15}); ~5:00 wall clock.
 - `colcon test`: **10** packages pass (22 `test_math` gtests +
   4 `test_pseudo_inverse` + 5 `test_filters` gtests from
   `crisp_controllers`).
