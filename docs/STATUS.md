@@ -1,19 +1,16 @@
 # Status
 
-_Last updated: 2026-04-25 (**fourth consecutive blocker-only STATUS
-iteration — no code change**). This iteration's single logical change
-is a **compaction of STATUS.md itself** to comply with AGENTS.md §2
-("Ours, agent-edited | Live state snapshot. Overwrite each iteration.").
-The previous file had grown to 2141 lines / ~126 KB via appended
-`_Previous iteration:_` narrative blocks; the same information is
-preserved in the git log (commit-by-commit `test(m6): …` messages) and
-in the frozen unit-test files. No runtime code, test code, or submodule
-pointer was touched. The prior iteration's
-`scripts/run_tests.sh` run (unit 1522 + colcon 10 packages + integration
-12 launch tests × {ur5e, ur15}, ~5:18 wall clock) remains the current
-green baseline; unit tests were re-run this iteration (`--unit-only`) to
-confirm the docs-only change does not regress the import-side-effect
-tests._
+_Last updated: 2026-04-25 (**fifth consecutive blocker-only STATUS
+iteration — no code change**). The previous iteration compacted
+STATUS.md from 2141 lines to the current snapshot form. This iteration
+adds nothing new: M6.0 remains the sole blocking gate and no operator
+input has arrived in the interval. Per AGENTS.md §3 step 7 / §7 the
+agent commits only this STATUS refresh and stops. Unit tests re-run
+(`scripts/run_tests.sh --unit-only`, 1522 passed) as a sanity gate on
+the docs-only edit. The prior full-gate run (unit 1522 + colcon 10
+packages + 12 launch tests × {ur5e, ur15}, ~5:18 wall clock) remains
+the current green baseline; nothing runtime-facing changed so
+integration tests were not re-run._
 
 ## Current milestone
 
@@ -36,7 +33,7 @@ iterations is **complete for the gated R2/R3 orchestrator**; remaining
 open seams are all either deferred-by-design or gated on M6.0 (see
 "Pre-bake chain status" below).
 
-This is the fourth consecutive iteration with this same conclusion;
+This is the fifth consecutive iteration with this same conclusion;
 no operator input has been received in the interval. Per AGENTS.md
 §3 step 7, the agent commits only this STATUS update and stops.
 
@@ -131,7 +128,7 @@ Unblocked ordering:
 
 Active for **M6** (please resolve in order):
 
-- **[M6.0 gate — still active, 4th iteration]** Decide how to vendor
+- **[M6.0 gate — still active, 5th iteration]** Decide how to vendor
   the `mujoco_ros2_control` patch required for claim-aware ctrl
   routing. ADR-0012 §Decisions-to-gate lists three options;
   recommendation is **(a) submodule under
