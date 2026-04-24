@@ -1,10 +1,11 @@
 # Status
 
-_Last updated: 2026-04-24 (R2 stage-3 TCP assertion harness pre-baked
-as `tests/integration/r2_stage3_assertions.py` + 20 unit tests — the
-pure-math half of M6.14 lands ahead of the FK-source decision, which
-only gates the orchestrator. M6.0 operator gate still active for every
-bullet that requires live sim changes)._
+_Last updated: 2026-04-24 (R2 stage-3 commanded TCP trajectory
+generators pre-baked as `tests/integration/r2_stage3_commands.py` +
+30 unit tests — line / arc / sine-in-z emitters feed the stage-3
+assertion harness directly, still ahead of the FK-source decision.
+M6.0 operator gate still active for every bullet that requires live
+sim changes)._
 
 ## Current milestone
 
@@ -35,18 +36,19 @@ With M6.15's schema live plus the loader, theoretical helpers,
 measured-signal helpers, stage-1 assertion harness, stage-2
 joint-space harness (settle-window support + the
 `evaluate_all_joints_from_expectation` wrapper), per-arm stage-2
-tolerance block wired through the loader, and now the stage-3
-TCP assertion harness (`r2_stage3_assertions.py` with
-`evaluate_tcp_trajectory` + `evaluate_tcp_trajectory_from_expectation`
-sourcing `tcp.tolerances` straight from `ArmExpectation`), M6.12
-(R2 stage-1), the joint-space path of M6.13 (R2 stage-2), and
-the assertion side of M6.14 (R2 stage-3) can all be authored
-end-to-end as sim-collection orchestrators — they just can't
-run until M6.5 ships. The stage-3 harness uses per-axis
-roll/pitch/yaw peak error (to match ROADMAP R2 wording
-literally) and a two-half-means drift proxy gated to
-`steady_window_s >= 30 s` (no linear extrapolation from shorter
-windows). Still missing on the pre-bake chain:
+tolerance block wired through the loader, the stage-3 TCP assertion
+harness, and now the stage-3 **commanded** TCP trajectory generators
+(`r2_stage3_commands.py` with `line_trajectory`, `arc_trajectory`,
+`sine_in_z_trajectory` returning a typed `TcpTrajectory` whose
+`(times, positions, orientations)` fields plug straight into
+`evaluate_tcp_trajectory`), M6.12 (R2 stage-1), the joint-space path
+of M6.13 (R2 stage-2), and the assertion side of M6.14 (R2 stage-3)
+can all be authored end-to-end as sim-collection orchestrators —
+they just can't run until M6.5 ships. The commanded-trajectory
+generators are pure stdlib, validate quaternion norm in the same
+[0.5, 1.5] band the assertion harness uses, and normalise returned
+quats so downstream consumers get unit rotations unconditionally.
+Still missing on the pre-bake chain:
 
 1. M6.13 / M6.14 FK module itself — needed by the orchestrators
    that feed the stage-2 cartesian branch and the stage-3
@@ -56,7 +58,41 @@ windows). Still missing on the pre-bake chain:
 
 ## Last completed tasks
 
-- **This iteration: R2 stage-3 TCP assertion harness.** Added
+- **This iteration: R2 stage-3 commanded TCP trajectory generators.**
+  Added `tests/integration/r2_stage3_commands.py` exporting
+  `TcpTrajectory` (frozen dataclass carrying `times`, `positions`,
+  `orientations` as parallel tuples) and three generators matching
+  the ROADMAP R2 stage-3 shapes verbatim: `line_trajectory` (constant
+  linear velocity, linear interpolation), `arc_trajectory` (planar
+  circular arc in any of `xy` / `xz` / `yz` at constant angular
+  rate, out-of-plane coord held at the centre), and
+  `sine_in_z_trajectory` (`z(t) = base.z + A sin(2π f t + φ)` with
+  `x`/`y` held). Each generator accepts an optional
+  `orientation_quat` (defaults to identity), validates quaternion
+  norm against the same [0.5, 1.5] band the stage-3 assertion
+  harness uses, and returns unit quats regardless of input norm so
+  downstream consumers never have to re-normalise. Timing is
+  validated (finite, strictly positive, `dt_s <= duration_s`) and
+  `times[-1]` is pinned to the requested `duration_s` exactly so a
+  future orchestrator can splice multiple trajectories without
+  endpoint drift. Pure stdlib. Pinned by 30 unit tests in
+  `tests/unit/test_r2_stage3_commands.py`: sample count and
+  endpoints, monotonic times, linear interpolation midpoint, quat
+  normalisation, default-identity orientation, bad timing rejection
+  (zero / negative / NaN / dt > duration), non-finite positions,
+  degenerate quaternions, arc radius preservation in plane, all
+  three planes, bad radius / unknown plane / non-finite angle
+  rejection, sine amplitude bounds, zero-phase and π/2-phase
+  behaviour, bad frequency / non-finite amplitude rejection,
+  end-to-end compatibility with `evaluate_tcp_trajectory` (feeding
+  the generated trajectory as both commanded and measured yields
+  zero RMSE / peak / orientation error), dataclass immutability,
+  and the `duration_s` property. Unit gate now reports **335
+  passed** (up from 305). Full `scripts/run_tests.sh` green
+  end-to-end: unit (335) + colcon test (10 packages, 22 `test_math`
+  + 5 `test_filters` gtests) + integration (12 launch tests ×
+  {ur5e, ur15}), ~5:00 wall clock.
+- **Prior iteration: R2 stage-3 TCP assertion harness.** Added
   `tests/integration/r2_stage3_assertions.py` with
   `evaluate_tcp_trajectory(...)` (position RMSE + peak, per-axis
   RPY peak orientation error, optional two-half-means steady
@@ -64,24 +100,7 @@ windows). Still missing on the pre-bake chain:
   expectation-driven wrapper
   `evaluate_tcp_trajectory_from_expectation(arm, controller,
   ...)` that sources the four `tcp.tolerances` keys from
-  `ArmExpectation.tcp_tolerances`. Pure stdlib (Hamilton
-  quaternion multiply + tf2-convention RPY decomposition),
-  antipodal-pair handling (`q` and `-q` report zero rotation),
-  tolerant normalization (reject only degenerate norms outside
-  [0.5, 1.5]). Returns a typed `TcpStage3Result` with `.ok`,
-  `.failures`, `.notes`, `.format()` — same surface as stage-1 /
-  stage-2. Pinned by 20 unit tests in
-  `tests/unit/test_r2_stage3_assertions.py`: happy path, per-
-  tolerance failures (RMSE, peak, orientation, drift), antipodal
-  and non-unit quaternion handling, drift-check passing /
-  failing / skipped-short-window / skipped-tolerance-none,
-  validation (non-monotonic times, length mismatch, negative
-  window, oversized window), the expectation-driven wrapper on
-  both arms, and result formatting. Unit gate now reports
-  **305 passed** (up from 285). Full `scripts/run_tests.sh`
-  green end-to-end: unit (305) + colcon test (10 packages,
-  22 `test_math` + 5 `test_filters` gtests) + integration
-  (12 launch tests × {ur5e, ur15}), ~5:00 wall clock.
+  `ArmExpectation.tcp_tolerances`.
 - **Prior iteration: stage-2 evaluator ArmExpectation wrapper.**
   Added `evaluate_all_joints_from_expectation(arm, controller,
   ...)` to `tests/integration/r2_stage2_assertions.py`. The
@@ -156,8 +175,9 @@ windows). Still missing on the pre-bake chain:
 
 ## Test status
 
-- Unit tests: `scripts/run_tests.sh --unit-only` — **305 passed**
-  (up from 285; +20 tests pinning the new stage-3 harness).
+- Unit tests: `scripts/run_tests.sh --unit-only` — **335 passed**
+  (up from 305; +30 tests pinning the new commanded-trajectory
+  generators).
 - Integration tests: re-run this iteration — all **12** launch
   tests green (sim smoke + 3 crisp roles + simple_joint_impedance
   + cartesian_motion, each × {ur5e, ur15}); ~4:57 wall clock.
