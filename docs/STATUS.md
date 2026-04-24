@@ -1,26 +1,40 @@
 # Status
 
-_Last updated: 2026-04-24 (R3 test-parametrisation helper landed as
-`tests/integration/r3_payload_parametrize.py` + 40 unit tests —
-pre-bakes the `{arm} × {payload}` matrix consumed by M6.19. Pure
-stdlib; exports `arm_payload_combinations(arms=None,
-payload_names=None) -> Tuple[Tuple[str, str], ...]` and
-`arm_payload_ids(combinations) -> Tuple[str, ...]`. Defaults draw
-from `expectations_loader.SUPPORTED_ARMS` × the ordered
-`load_payloads()` catalog; caller-supplied subsets are respected
-in their given order (outer: arms, inner: payloads — so a human
-reading pytest output walks each arm through the payload ladder
-together). Ids are `"<arm>-<payload>"`, shaped to drop
-straight into `pytest.mark.parametrize(..., ids=...)` next to the
-`argvalues` tuple without an adaptor. Validates unknown arm /
-payload, duplicates, non-str entries, wrong container, empty
-selection; for ids additionally validates 2-tuple shape, non-empty
-str components, and rejects `-` in either component (reserved as
-the id separator, prevents round-trip ambiguity). No adjustment
-of expectation values here — payload-adjusted expectations are a
-separate seam that needs per-joint kinematics data the YAMLs do
-not yet carry. M6.0 operator gate still active for every bullet
-that requires live sim changes.)._
+_Last updated: 2026-04-24 (R3 `EePayload` message-shape builder
+landed as `tests/integration/r3_payload_ee_msg.py` + 27 unit tests —
+pre-bakes the M6.16 ROS runtime-API plumbing seam. Pure stdlib;
+exports frozen dataclass `EePayloadMessage(mass_kg,
+inertia_row_major: Tuple[9 floats], pose_position_xyz: Tuple[3],
+pose_orientation_xyzw: Tuple[4])` plus
+`payload_to_ee_msg(payload) -> EePayloadMessage`. Converts a
+validated :class:`Payload` into the shape ADR-0012 addendum §R3.1
+specifies for `ur_sim_msgs/EePayload`: `mass` (double, kg),
+`inertia` as a symmetric 9-double row-major tensor
+`[ixx, ixy, ixz, ixy, iyy, iyz, ixz, iyz, izz]` (v1 validator pins
+off-diagonals to zero; symmetric layout future-proofs a
+relaxation), and `pose` as `(x, y, z)` position +
+`geometry_msgs/Quaternion`-shaped `(x, y, z, w)` orientation (xyzw
+ordering, reusing the sibling `r3_payload_mjcf._euler_xyz_to_wxyz`
+helper and reordering — one source of truth for the intrinsic-XYZ
+convention avoids MJCF-vs-ROS drift). Zero-mass payloads produce a
+well-formed message with zero mass / zero inertia and the
+loader-supplied pose **preserved** (ADR-0012 §R3.2 pins zero mass
+as the sim's launch state; loader doesn't tie pose to mass, so
+canonicalizing to identity would be data loss). Also exposes
+`EePayloadMessage.to_dict()` returning the ROS-message-shaped dict
+so a ROS-side adapter can populate a real `ur_sim_msgs/EePayload`
+field-by-field. Pinned by 27 unit tests: export surface, frozen
+dataclass contract, all three catalog payloads (`no_payload`,
+`small_payload`, `large_payload`) round-trip, inertia symmetric
+9-tuple layout, pose echo (incl. negative components), zero-mass
+preserving non-zero pose position and orientation, canonical
+rotations about X / Y / Z at π/2, unit-norm invariant for
+arbitrary rpy, `xyzw == wxyz reordered` cross-check against the
+MJCF-side helper, `to_dict()` shape mirrors ROS message, and the
+validator-propagation matrix (negative mass, non-diagonal `ixy`,
+zero-mass-with-nonzero-inertia, NaN in `pose_xyz` / `pose_rpy`).
+M6.0 operator gate still active for every bullet that requires
+live sim changes.)._
 
 ## Current milestone
 
@@ -80,15 +94,65 @@ Still missing on the pre-bake chain:
    deliberately keep these out of tree so the source / licensing
    decision is independent of the orchestrator wiring.
 2. M6.19 payload parametrisation across R2 stages (needs M6.16–
-   M6.18 to land first). The validator landed this iteration is
-   the preflight seam those bullets will plug into; it is
-   deliberately decoupled from the message / MJCF shape so the
+   M6.18 to land first). The validator + MJCF emitter + MJCF
+   splicer + EePayload message-shape builder landed so far are
+   the preflight seams those bullets will plug into; the message
+   seam is deliberately decoupled from the MJCF seam so the
    `ur_sim_msgs/EePayload` vs `geometry_msgs/Inertia + PoseStamped`
-   decision (M6 R3 blocker #3) can be made independently.
+   decision (M6 R3 blocker #3) can still be made independently.
+3. A thin ROS-side `EePayloadMessage -> ur_sim_msgs/EePayload`
+   materialiser — by design lives outside the pre-bake chain so
+   it can import `ur_sim_msgs` (and decide whether to use
+   `geometry_msgs/Inertia` instead) at test-run time.
 
 ## Last completed tasks
 
-- **This iteration: R3 test-parametrisation helper (pre-bakes the
+- **This iteration: R3 `EePayload` message-shape builder
+  (pre-bakes M6.16 ROS runtime-API plumbing).** Added
+  `tests/integration/r3_payload_ee_msg.py` exporting the frozen
+  dataclass `EePayloadMessage(mass_kg,
+  inertia_row_major: Tuple[9 floats], pose_position_xyz: Tuple[3],
+  pose_orientation_xyzw: Tuple[4])` plus
+  `payload_to_ee_msg(payload) -> EePayloadMessage`. Converts a
+  validated :class:`Payload` into the shape ADR-0012 addendum
+  §R3.1 specifies for `ur_sim_msgs/EePayload`: `mass` (double,
+  kg), `inertia` as a symmetric 9-double row-major tensor
+  `[ixx, ixy, ixz, ixy, iyy, iyz, ixz, iyz, izz]` (v1 validator
+  pins off-diagonals to zero; symmetric layout future-proofs a
+  relaxation), and `pose` as `(x, y, z)` position +
+  `geometry_msgs/Quaternion`-shaped `(x, y, z, w)` orientation.
+  Reuses the sibling `r3_payload_mjcf._euler_xyz_to_wxyz` helper
+  and reorders `(w, x, y, z) -> (x, y, z, w)` so there's a single
+  source of truth for the intrinsic-XYZ convention (prevents
+  MJCF-vs-ROS drift in the rotation representation).
+  **Zero-mass payloads produce a well-formed message with the
+  loader-supplied pose preserved** (ADR-0012 §R3.2 pins zero mass
+  as the sim's launch state; the loader doesn't tie pose to
+  mass, so canonicalizing to identity would be data loss — this
+  was an explicit rubber-duck finding and is pinned by dedicated
+  tests). Exposes `EePayloadMessage.to_dict()` returning the
+  ROS-message-shaped dict so a ROS-side adapter can populate a
+  real `ur_sim_msgs/EePayload` field-by-field. Pure stdlib; no
+  numpy, no ROS. Pinned by 27 unit tests in
+  `tests/unit/test_r3_payload_ee_msg.py`: export surface, frozen
+  dataclass contract + `FrozenInstanceError`, all three catalog
+  payloads (`no_payload`, `small_payload`, `large_payload`)
+  round-trip, inertia symmetric 9-tuple layout and length,
+  pose-position echo (including negative components),
+  zero-mass-preserves-nonzero-pose (position + orientation
+  separately), canonical rotations about X / Y / Z at π/2,
+  unit-norm invariant for arbitrary rpy, `xyzw == wxyz reordered`
+  cross-check against the MJCF-side helper, last-component
+  sanity (identity rpy → `w == 1` at index 3), `to_dict()`
+  shape / inertia-as-list, and the validator-propagation matrix
+  (negative mass, non-diagonal `ixy`, zero-mass-with-nonzero-
+  inertia, NaN in `pose_xyz` / `pose_rpy`). Unit gate now reports
+  **707 passed** (up from 680). Full `scripts/run_tests.sh` green
+  end-to-end: unit (707) + colcon test (10 packages, 22
+  `test_math` + 5 `test_filters` + 4 `test_pseudo_inverse`
+  gtests) + integration (12 launch tests × {ur5e, ur15}), ~4:48
+  wall clock for the integration slice.
+- **Prior iteration: R3 test-parametrisation helper (pre-bakes the
   M6.19 `{arm} × {payload}` matrix).** Added
   `tests/integration/r3_payload_parametrize.py` exporting
   `arm_payload_combinations(arms=None, payload_names=None, *,
@@ -96,33 +160,7 @@ Still missing on the pre-bake chain:
   `arm_payload_ids(combinations) -> Tuple[str, ...]`. Defaults
   enumerate the full ROADMAP matrix: outer =
   `expectations_loader.SUPPORTED_ARMS`, inner = catalog-ordered
-  `load_payloads()`. Caller-supplied subsets are respected in
-  their given order so pytest output walks each arm through its
-  payload ladder together. Ids are shaped `"<arm>-<payload>"`
-  (e.g. `"ur5e-no_payload"`), intended to be passed directly as
-  `pytest.mark.parametrize(..., ids=...)` alongside the combo
-  tuple without an adaptor. `ValueError` on: unknown arm or
-  payload, duplicates, non-str entries, wrong container type,
-  empty selection; id-builder additionally validates 2-tuple
-  shape, non-empty str components, and rejects `-` in either
-  component (reserved as the id separator, prevents round-trip
-  ambiguity). Pure stdlib — no numpy, no ROS, no pytest import at
-  module level so the helper is reusable from non-test tooling.
-  Does **not** compute payload-adjusted expectation values; that
-  is a separate seam that needs per-joint kinematics data the
-  YAMLs do not yet carry, deliberately split off so this helper
-  does not speculate on physics. Pinned by 40 unit tests in
-  `tests/unit/test_r3_payload_parametrize.py`: export surface,
-  default product shape / cardinality / ordering, caller-supplied
-  arm / payload subsets (both dimensions, both list and tuple
-  inputs, single-element subsets), id parallelism with combos,
-  id order preservation, and the full rejection matrix for
-  both functions. Unit gate now reports **680 passed** (up from
-  640). Full `scripts/run_tests.sh` green end-to-end: unit (680)
-  + colcon test (10 packages, 22 `test_math` + 5 `test_filters`
-  + 4 `test_pseudo_inverse` gtests) + integration (12 launch
-  tests × {ur5e, ur15}), ~4:46 wall clock for the integration
-  slice.
+  `load_payloads()`. Pinned by 40 unit tests.
 - **Prior iteration: R3 MJCF payload splicer (pre-bakes M6.17
   document-level seam).** Added
   `tests/integration/r3_payload_splice.py` exporting
@@ -559,11 +597,11 @@ Still missing on the pre-bake chain:
 
 ## Test status
 
-- Unit tests: `scripts/run_tests.sh --unit-only` — **680 passed**
-  (up from 640; +40 R3 parametrisation tests).
+- Unit tests: `scripts/run_tests.sh --unit-only` — **707 passed**
+  (up from 680; +27 R3 `EePayload` message-shape builder tests).
 - Integration tests: re-run this iteration — all **12** launch
   tests green (sim smoke + 3 crisp roles + simple_joint_impedance
-  + cartesian_motion, each × {ur5e, ur15}); ~4:46 wall clock.
+  + cartesian_motion, each × {ur5e, ur15}); ~4:48 wall clock.
 - `colcon test`: **10** packages pass (22 `test_math` gtests +
   4 `test_pseudo_inverse` + 5 `test_filters` gtests from
   `crisp_controllers`).
