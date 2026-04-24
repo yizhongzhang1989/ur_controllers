@@ -494,3 +494,264 @@ Format: ADR-lite. Do not delete past entries; supersede with a new one.
   - When cartesian FK metrics land (future ADR superseding ADR-0010),
     the cartesian override in `compare.py` must be dropped in the
     same change so the report starts showing real numbers.
+
+---
+
+## ADR-0012 — Unified MuJoCo sim: expose all command interfaces, switch at runtime
+
+- **Date:** 2026-04-24
+- **Status:** Proposed (operator review pending — see M6.0 gate in
+  `docs/ROADMAP.md`).
+- **Context:**
+  - Today the sim is launch-locked to a single control mode
+    (`--control_mode {position,effort}`). `generate_mujoco_model.sh`
+    emits *either* `<position>` actuators *or* `<motor>` actuators,
+    and the URDF `<ros2_control>` block declares the matching single
+    command interface. Consequence: `joint_trajectory_controller`
+    with `command_interfaces: [position]` cannot activate against an
+    effort-mode launch, and `forward_effort_controller` cannot
+    activate against a position-mode launch. Runtime controller
+    switching is therefore restricted to controllers that share the
+    launch-time interface (SHORTCOMINGS.md §2; ROADMAP M6 context).
+  - On a real UR, `ur_robot_driver` exposes position, velocity, and
+    effort command interfaces simultaneously. `ros2 control
+    switch_controllers` is the only mechanism needed to change
+    control mode. This is the interface surface we want to match.
+  - MuJoCo itself can host multiple actuators per joint (torques sum
+    into `qfrc_actuator`). The block is not physics, it is (a) the
+    MJCF-is-generated-per-mode convention in
+    `generate_mujoco_model.sh`, and (b) the `mujoco_ros2_control`
+    plugin reading whichever interface the URDF declares and
+    forwarding into the matching actuator. Both are our code to
+    change (sim) / patch (external package).
+  - Downstream consumers (crisp, simple_jimp, cartesian_motion, JTC,
+    MoveIt) all target the same ros2_control APIs. If the sim
+    matches the real UR at that API, none of them need per-platform
+    YAML forks.
+- **Decision:**
+  1. **Unified interface surface.** MuJoCo sim exports, per joint,
+     `command_interface {position, velocity, effort}` and
+     `state_interface {position, velocity, effort}`, matching
+     `ur_robot_driver`. No more `control_mode` launch gating of the
+     interface set.
+  2. **Three actuators per joint in MJCF.**
+     - `<position name="J_pos" joint="J" kp="KP" kv="KV" forcerange="..."/>`
+       for the position command interface. `KP`/`KV` stay at the
+       current per-joint values (ITERATION_LOG.md round 3 tuning),
+       but are now soft enough that on unclaim (§Transition rules)
+       the PD term contributes ~0 torque.
+     - `<velocity name="J_vel" joint="J" kv="..." forcerange="..."/>`
+       for the velocity command interface.
+     - `<motor name="J_eff" joint="J" ctrlrange="..."/>` for the
+       effort command interface. `ctrlrange` = per-joint torque
+       limit from `config/ur_types/<arm>.yaml`.
+  3. **Claim-aware ctrl routing (`mujoco_ros2_control` patch).** On
+     every update tick, for every joint:
+     - If the `position` command interface is claimed: forward the
+       commanded q_d into `J_pos.ctrl`; zero `J_eff.ctrl`; set
+       `J_vel.ctrl = 0`.
+     - If `effort` is claimed: forward commanded τ_d into
+       `J_eff.ctrl`; **snap `J_pos.ctrl = q` (current position)** so
+       the position PD contributes ~0 torque; set `J_vel.ctrl = 0`.
+     - If `velocity` is claimed: forward commanded q̇_d into
+       `J_vel.ctrl`; snap `J_pos.ctrl = q`; zero `J_eff.ctrl`.
+     - If none is claimed: snap `J_pos.ctrl = q`, zero `J_vel` and
+       `J_eff` — arm holds position via the position PD alone (this
+       is the "safe idle" behaviour chosen to mirror a real UR
+       with no controller active).
+     This routing is implemented in the plugin, not in user-space
+     nodes. Two ctrl surfaces are always zero or state-snapped; only
+     one carries the active command.
+  4. **Mutual exclusion relies on ros2_control.** ros2_control
+     already forbids two active controllers from claiming the same
+     command interface on the same joint. The plugin trusts that
+     invariant; it never forwards a stale command from an unclaimed
+     interface. Dual-claim (e.g. position + effort on the same
+     joint simultaneously) is **not** supported in M6; cooperative
+     position + torque requires chainable controllers, which is a
+     separate future ADR.
+  5. **Single controllers YAML.** Sim config collapses to one
+     `ur_controllers.yaml` aligned with upstream UR. Controllers
+     that are loaded-but-inactive at startup match the upstream
+     default set; launch arg `--default-controller` picks which
+     command controller is `active` at t=0 (default:
+     `scaled_joint_trajectory_controller`, matching real-UR +
+     MoveIt).
+  6. **ADR-0007 transitions.** ADR-0007 ("crisp controllers own the
+     effort interfaces exclusively") is *upheld as a runtime
+     invariant* but no longer needs special launch-time handling:
+     activating a crisp role deactivates `forward_effort_controller`
+     via `switch_controllers --strict` (which is what the existing
+     bringup already does). The sim's `gravity_compensation.py`
+     shim becomes a development aid, not part of the default
+     launch — see M6.7.
+  7. **Real-UR parity is a goal, not a guarantee.** The sim's
+     position interface is a pure MuJoCo PD; the real UR position
+     interface is the outer of a cascaded loop with integral
+     action, gearbox compliance, and current saturation. Matching
+     *interfaces* gives portable YAMLs; matching *dynamics* is a
+     separate modelling task (armature, joint damping/friction,
+     torque-tracking lag — listed as a follow-up, not part of M6).
+- **Decisions to gate (operator, M6.0):**
+  - (a) **Vendor `mujoco_ros2_control` as a submodule under
+    `third_party/mujoco_ros2_control`**, tracked on an `auto_dev`
+    branch analogous to `ur_simulator` (ADR-0003). Pro: same
+    ownership model as `ur_simulator`; clean upstreaming path. Con:
+    new submodule = human gate (AGENTS.md §7).
+  - (b) **Overlay patch package** under `third_party/` that replaces
+    the plugin via package-name shadowing. Pro: no submodule bump.
+    Con: fragile against upstream version bumps; harder to
+    upstream.
+  - (c) **Patch locally inside `ur_simulator@auto_dev` (treating
+    `mujoco_ros2_control` as a vendored dep inside that repo)**.
+    Pro: uses the submodule we already own. Con: conflates sim
+    config and the ros2_control plugin in one repo; may bloat the
+    sim.
+  - Recommended: **(a)**. Matches ADR-0003's ownership discipline
+    and keeps the sim repo focused on configs + MJCF generation.
+  - Operator also to confirm: target UR driver version for
+    interface parity (Humble `ur_robot_driver` 2.4.x exposes effort;
+    2.3.x does not). Recorded as a fact under the chosen option.
+- **Transition rules (summary for implementers):**
+  - Switching *into* a position controller: no action needed
+    beyond the routing in §3 — the position actuator's `ctrl` is
+    overwritten the same tick.
+  - Switching *out of* a position controller: the next tick the
+    plugin must set `J_pos.ctrl = q`. Skipping this step will leave
+    the arm being pulled toward a stale `q_d` while an
+    effort/velocity controller thinks it has sole authority.
+  - Switching between effort ⇄ velocity: position actuator stays
+    snapped to `q`; the other two actuators swap which carries the
+    command. No mid-tick fight because ros2_control guarantees the
+    claim change is atomic w.r.t. the plugin's `read()/write()`.
+- **Consequences:**
+  - The user-facing CLI flag `--control_mode` is deprecated to
+    `--default-controller`. `scripts/launch_sim.sh` and all bringup
+    launch files drop the dichotomy.
+  - Integration tests parametrised over `{ur5e, ur15}` must be
+    extended with a runtime-switch test (M6.6). The existing
+    effort-mode tests (crisp, simple_jimp) become runtime switches
+    from the default JTC to the effort controller, rather than
+    launches in a dedicated effort mode.
+  - `docs/SHORTCOMINGS.md` §2 (S1) becomes obsolete and should be
+    struck when M6 lands.
+  - The sim's F/T sensor work (M4 bullet 5 blocker) is orthogonal
+    to M6 and remains operator-gated; M6 does not unblock it.
+  - If operator picks option (a), a new `.gitmodules` entry appears
+    and CI's `rosdep` skip-keys gain `mujoco_ros2_control` (we
+    build it from source).
+
+
+---
+
+## ADR-0012 addendum (2026-04-24) — R1, R2, R3 acceptance requirements
+
+Operator added three hard requirements to M6 after the initial
+ADR-0012 draft. They are recorded here, inline with the ADR they
+extend, rather than as a separate ADR because they refine — not
+supersede — the design.
+
+- **R1 — Sim/real binary parity of controllers.** ADR-0012's
+  "unified interface surface" decision is upgraded from a goal to a
+  **hard constraint**: zero config diff between sim and real for any
+  controller. Practical consequences:
+  1. Controller YAMLs in `bringup/config/` are the single source of
+     truth and carry no sim-vs-real branching. If a parameter must
+     differ (e.g. a gain), the branching happens outside the YAML
+     (per-arm YAML, or loaded from a profile), never per-driver.
+  2. The sim's hardware-interface plugin (`mujoco_ros2_control`,
+     post-M6.4 patch) must emit interface names byte-identical to
+     `ur_robot_driver`. `docs/real_driver_parity.md` (new, M6.10) is
+     the verification artefact.
+  3. `sim_broadcasters.py` topics must be renamed if they collide
+     with real-driver names; otherwise they publish stub values on
+     the same topic names and ADR-0012's "safe idle" behaviour
+     applies. Audit in M6.10.
+  4. Gravity-comp shim (`gravity_compensation.py`) is
+     disabled-by-default post-M6 (M6.7). It may still be enabled
+     explicitly for debugging, but is never in the real-parity
+     launch path.
+
+- **R2 — Structured test matrix.** The integration test story
+  expands from "regulation holds within 0.15 rad" to a three-stage
+  matrix (single-joint → all-joints → end-effector), each
+  parametrised over `{ur5e, ur15} × payload ∈ {none, small, large}`
+  (R3). Every test records its **theoretical expectation** alongside
+  the measured result, and fails if the gap exceeds the declared
+  tolerance.
+  - Theoretical baselines live in
+    `tests/integration/expectations/{ur5e,ur15}.yaml` and
+    `expectations/payloads.yaml`.
+  - Expected responses are computed from first principles
+    (second-order impedance law, rigid-body FK), not measured; the
+    test harness runs the formula at assertion time so changing a
+    stiffness updates the expected curve automatically.
+  - "No drift" (position mode) is quantified as ≤ 1e-3 rad
+    steady-state joint drift over a 10 s hold. "No chatter" is a
+    velocity RMS threshold in the last 2 s of each test. "No
+    limit-cycle oscillation" is an FFT check: no peak in the 1 Hz–
+    Nyquist band above the measurement noise floor by more than
+    6 dB. Concrete thresholds live in the expectations YAML so the
+    agent can tune them per arm without touching assertion code.
+  - Damping-ratio-from-step is the single most informative check:
+    it directly verifies the closed-loop dynamics the YAML claims.
+    Deviation > ±20% between measured and predicted ζ fails the
+    test — same tolerance the simple_jimp gtest currently uses for
+    its critical-damping auto-fill.
+
+- **R3 — Configurable end-effector payload.** Every integration
+  test runs at three payload levels. The sim must physically
+  simulate the payload (via MJCF body attachment), visualise it
+  (three.js cube anchored at `tool0`), and publish it to
+  controllers (latched `/ee_payload`, service
+  `~/set_ee_payload`). Key design points:
+  1. **Message type.** New `ur_sim_msgs/EePayload` with `mass`
+     (double, kg), `inertia` (9 doubles, kg·m², row-major, at the
+     payload's COM and frame), and `pose`
+     (`geometry_msgs/Pose`, relative to `tool0`). Rationale:
+     matches `sensor_msgs/Imu`-style tensor packing and mirrors
+     the arguments of UR's `set_payload` URScript function.
+  2. **Initial state.** Zero mass on sim launch. This matches
+     what `ur_robot_driver` publishes before an operator runs
+     `set_payload`, preserving R1.
+  3. **Runtime attachment in MuJoCo.** MuJoCo does not allow
+     adding `<body>` elements post-`mj_loadXML`. Two options,
+     first chosen for M6.17:
+     - (A) Regenerate the MJCF whenever payload changes and
+       reload the model. Works; costs ~50–200 ms and a brief
+       physics pause. Acceptable for interactive dashboard use,
+       not for closed-loop payload adaptation (out of scope).
+     - (B) Pre-declare a "payload slot" body at MJCF generation
+       time with zero mass and placeholder geom, then mutate
+       `mj_model.body_mass`, `body_inertia`, and
+       `body_pos`/`body_quat` at runtime via the plugin. No
+       reload, no pause. Decision: **start with (A)** for M6.17
+       (simpler, no plugin knowledge needed); migrate to (B) if
+       the dashboard UX demands seamless updates.
+  4. **Visualisation.** Cube edge length = $(m / \rho)^{1/3}$ with
+     $\rho = 1000\,\text{kg/m}^3$ default, overridable in the
+     dashboard. Wire-frame only, so it never occludes the arm.
+     Cube colour: red if the currently-active controller's config
+     has `use_gravity_compensation: false` or is unaware of
+     payload, green otherwise. This gives the user an immediate
+     visual cue when they add payload to a non-compensated
+     controller and should expect drift.
+  5. **Payload levels in tests.**
+     - `no_payload`: mass = 0.
+     - `small_payload`: 1.0 kg cube, inertia diag(8.3e-4, 8.3e-4,
+       8.3e-4) for a 0.1 m edge, pose = identity at `tool0`.
+     - `large_payload`: 5.0 kg cube, inertia diag(2.1e-2, 2.1e-2,
+       2.1e-2) for a 0.2 m edge, pose = translation (0, 0, 0.1) m
+       along tool-Z. 5 kg is within UR5e rated payload and well
+       within UR15's; pick arm-specific values only if the large
+       case exceeds the arm's limit (will be flagged by the
+       tolerance-from-expectation check).
+- **Consequences of R1/R2/R3 on the M6 bullet order.**
+  - M6.10, M6.11 (R1) land early so every subsequent bullet is
+    verified against the real driver's interface spec.
+  - M6.15 (expectations YAML) must land before M6.12–M6.14 so the
+    assertions have a source of truth.
+  - M6.16 (payload message + API) must land before M6.17–M6.19 so
+    the plumbing exists before the physics and UX bullets.
+  - M6.19 (payload-parametrised tests) is the final bullet before
+    M6.9 (submodule bump).
