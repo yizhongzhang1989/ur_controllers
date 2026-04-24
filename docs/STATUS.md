@@ -1,6 +1,95 @@
 # Status
 
-_Last updated: 2026-04-24 (R2 **artefact reader** landed as
+_Last updated: 2026-04-24 (R2 **run-level aggregator** landed as
+`tests/integration/r2_aggregate.py` + 50 unit tests — closes the
+"future M5-like R2 aggregation driver (analogous to
+`evaluation/compare.py` over R2 artefacts)" seam the
+`r2_read_artefact` module docstring pins (lines ~13-18). Exposes one
+narrow function `aggregate_r2_run(run_dir: Path) -> R2RunSummary`
+plus two frozen dataclasses: `R2Tally(total, passed, failed)` and
+`R2RunSummary(run_dir, artefacts, total, passed, failed,
+overall_pass, failed_artefacts, by_stage, by_arm, by_controller,
+by_payload)`. Chains `find_r2_artefacts` ->
+`read_r2_artefact(loc.path)` across every R2 artefact in
+`run_dir` and returns a deterministic-ordered summary: artefacts
+sorted by filesystem path (inherited from
+`find_r2_artefacts`); per-axis tally maps are
+`MappingProxyType`-wrapped so a caller cannot mutate the
+summary post-construction; iteration order on each tally map is
+stable by stringified key (so `by_stage` iterates `1,2,3` and
+`by_arm` iterates `ur15,ur5e` regardless of write order).
+`overall_pass` is **strict**: `True` iff `total > 0 and failed == 0`
+— an empty run dir yields `total=0, overall_pass=False` so a
+caller can treat "R2 sweep didn't produce any artefact" as a
+failure without an extra guard. Validation is fully delegated: the
+discovery layer raises `FileNotFoundError` / `NotADirectoryError` /
+`ValueError` / `TypeError` with `r2_find_artefacts:` prefix; the
+reader raises `ValueError` / `TypeError` / `FileNotFoundError` /
+`IsADirectoryError` with `r2_read_artefact:` prefix; this module
+itself only contributes `TypeError` on non-Path `run_dir` with
+`r2_aggregate:` prefix. Duplicate primary-key tuples cannot occur
+in a well-formed run dir (writer's filename is derived from
+`(stage, arm, controller, payload)` and filesystems enforce
+filename uniqueness; the reader's filename/content round-trip
+check then forbids a hand-renamed file from presenting a different
+combo than its name) — the aggregator therefore does not re-check
+uniqueness, keeping the module free of dead-code safety belts.
+`failed_artefacts` is pre-computed on the summary (same order as
+`artefacts`, filtered to `passed=False`) so a future report
+writer can show failures first without re-filtering at every
+caller. Sibling modules loaded via file-path `importlib` with
+plain module-name keys (matching the `r2_find_artefacts` /
+`r2_read_artefact` convention, see the "module loading" repo
+memory) so the `R2Artefact` class identity returned by the
+aggregator is the very same class the reader returns (pinned by a
+dedicated `type(s.artefacts[0]) is _ra.R2Artefact` test). Pure
+stdlib + `MappingProxyType`; no PyYAML / numpy / ROS imports in
+this module (the reader brings its own PyYAML dependency). Pinned
+by 50 unit tests in `tests/unit/test_r2_aggregate.py`: export
+surface (`__all__`, frozen dataclasses); input validation
+(non-Path `run_dir` str/None/int → `TypeError` with
+`r2_aggregate:` prefix; missing `run_dir` → `FileNotFoundError`
+via the find layer; file-as-`run_dir` → `NotADirectoryError`;
+half-matching filename → `ValueError` via the find layer;
+corrupted YAML → `ValueError` via the reader); empty-run-dir
+semantics (total=0, overall_pass=False, all four tally maps are
+empty `MappingProxyType`s, `run_dir` preserved verbatim); single
+passing / single failing happy path; overall_pass truth table
+(empty, all-passed, mixed); artefact ordering (sorted by
+filesystem path, repeatable across two calls on the same dir);
+counts consistency as a 6-case parametrisation over
+`(n_pass, n_fail)`; per-axis tally correctness (by_stage, by_arm,
+by_controller, by_payload) with hand-picked combos; tally sum
+invariants (each axis's `sum(total)` equals top-level `total`;
+each tally's `total == passed + failed`); all four tally maps are
+`MappingProxyType` (both populated and empty cases); deterministic
+stringified-key iteration order on all four axes; non-recursive
+discovery (nested artefacts ignored); unrelated files silently
+skipped; a full-matrix 18-combo end-to-end (3 stages × 2 arms × 3
+payloads, all passed); a one-failure-flips-overall variant of
+that matrix; two independent run dirs aggregated side-by-side;
+and a class-identity test that pins the aggregator's output
+dataclass against the reader's. Unit gate now reports **1370
+passed** (up from 1320). Full `scripts/run_tests.sh` green
+end-to-end: unit (1370) + colcon test (10 packages, 22 `test_math`
++ 5 `test_filters` + 4 `test_pseudo_inverse` gtests) +
+integration (12 launch tests × {ur5e, ur15}, 301.29s). With this
+helper in place, the future R2 CSV / Markdown emitter (analogous
+to M5's `report.csv` / `report.md`) reduces to a pure rendering
+pass over `R2RunSummary` — no more open-coded file enumeration,
+no more re-reading YAML at every consumer. The pre-bake chain's
+only remaining open seams are the concrete FK/IK backends
+(deliberately kept out of tree so the source / licensing decision
+is independent of the orchestrator wiring), the ROS-side
+`JointTrajectoryGoal → FollowJointTrajectory.Goal` and
+`EePayloadMessage → ur_sim_msgs/EePayload` materialisers (by design
+kept outside the pre-bake chain so they can import
+`trajectory_msgs` / `ur_sim_msgs` at test-run time), and M6.19
+payload-parametrisation of the R2 stage bodies (needs M6.16–M6.18
+to land first, which are gated on M6.0). M6.0 operator gate
+remains active for every bullet that touches the live sim._
+
+_Previous iteration: R2 **artefact reader** landed as
 `tests/integration/r2_read_artefact.py` + 72 unit tests — closes the
 "schema validation is the artefact reader's concern" seam the
 `r2_find_artefacts` docstring defers (module docstring, lines ~58-59:
@@ -727,21 +816,20 @@ can import `trajectory_msgs` at test-run time.
 
 Still missing on the pre-bake chain:
 
-1. ~~R2 run-directory helper~~ — landed previous iteration as
-   `r2_run_dir.py`.
+1. ~~R2 run-directory helper~~ — landed as `r2_run_dir.py`.
 2. ~~R2 stage-3 cartesian gain resolver~~ — landed as
    `r2_stage3_cartesian_gains.py`.
-3. ~~R2 artefact discovery helper~~ — **landed this iteration** as
-   `r2_find_artefacts.py` (see top-of-file summary). Future R2
-   aggregation / reporting drivers now glob a run directory with a
-   single call: `find_r2_artefacts(run_dir, **filters)` yields
-   sorted `R2ArtefactLocator(path, stage, arm, controller, payload)`
-   records, with filename parsing guaranteed to round-trip the
-   `r2_run_artefact.artefact_filename` writer.
-4. The concrete FK **and** IK backends themselves — both adapters
+3. ~~R2 artefact discovery helper~~ — landed as
+   `r2_find_artefacts.py`.
+4. ~~R2 artefact reader~~ — landed as `r2_read_artefact.py`.
+5. ~~R2 run-level aggregator~~ — **landed this iteration** as
+   `r2_aggregate.py` (see top-of-file summary). Future R2
+   CSV / Markdown report writers now reduce to a pure rendering
+   pass over `R2RunSummary`.
+6. The concrete FK **and** IK backends themselves — both adapters
    deliberately keep these out of tree so the source / licensing
    decision is independent of the orchestrator wiring.
-5. M6.19 payload parametrisation across R2 stages (needs M6.16–
+7. M6.19 payload parametrisation across R2 stages (needs M6.16–
    M6.18 to land first). The validator + MJCF emitter + MJCF
    splicer + stripper + EePayload message-shape builder landed so
    far are the preflight seams those bullets will plug into; the
@@ -749,21 +837,63 @@ Still missing on the pre-bake chain:
    the `ur_sim_msgs/EePayload` vs `geometry_msgs/Inertia +
    PoseStamped` decision (M6 R3 blocker #3) can still be made
    independently.
-6. A thin ROS-side `EePayloadMessage -> ur_sim_msgs/EePayload`
+8. A thin ROS-side `EePayloadMessage -> ur_sim_msgs/EePayload`
    materialiser — by design lives outside the pre-bake chain so
    it can import `ur_sim_msgs` (and decide whether to use
    `geometry_msgs/Inertia` instead) at test-run time.
-7. A cartesian stage-3 theoretical-response extension for
-   `cartesian_second_order` (would consume the stiffnesses this
-   iteration's resolver returns). Deferred — stage-3 theoretical
-   currently emits `tcp_trajectory_tracking` only, which suffices
-   for the `cartesian_motion` position-mode and `JTC + ik_shim`
-   paths and for the free-space-drift tolerance on
-   `crisp_cartesian_impedance`.
+9. A cartesian stage-3 theoretical-response extension for
+   `cartesian_second_order` (would consume the stiffnesses the
+   stage-3 cartesian gain resolver returns). Deferred — stage-3
+   theoretical currently emits `tcp_trajectory_tracking` only,
+   which suffices for the `cartesian_motion` position-mode and
+   `JTC + ik_shim` paths and for the free-space-drift tolerance
+   on `crisp_cartesian_impedance`.
+10. An R2 CSV / Markdown report writer over `R2RunSummary`
+    (analogous to M5's `evaluation/compare.py::render_report`).
+    Natural next pre-bake step now that aggregation lands.
 
 ## Last completed tasks
 
-- **This iteration: R2 artefact discovery helper (closes the "M5
+- **This iteration: R2 run-level aggregator (closes the "future
+  M5-like R2 aggregation driver (analogous to `evaluation/compare.py`
+  over R2 artefacts)" seam the `r2_read_artefact` docstring pins).**
+  Added `tests/integration/r2_aggregate.py` exporting one narrow
+  function `aggregate_r2_run(run_dir) -> R2RunSummary` plus two
+  frozen dataclasses (`R2Tally`, `R2RunSummary`). Chains
+  `find_r2_artefacts -> read_r2_artefact` across every R2 artefact
+  in `run_dir` and returns a deterministic-ordered summary with
+  per-axis `R2Tally` breakdowns by stage / arm / controller /
+  payload. Tally maps are `MappingProxyType`-wrapped with stable
+  stringified-key iteration order; `overall_pass` is strict
+  (`True` iff `total > 0 and failed == 0`, so an empty run dir
+  fails without an extra guard). `failed_artefacts` is
+  pre-computed on the summary in the same order as `artefacts`.
+  Validation fully delegated to the find / read layers; this
+  module contributes only `TypeError` on non-Path `run_dir` with
+  `r2_aggregate:` prefix. Duplicate primary keys cannot occur in
+  a well-formed run dir (writer's derived filename + filesystem
+  uniqueness + reader's filename/content round-trip), so the
+  aggregator does not re-check uniqueness — no dead-code safety
+  belts. Sibling modules loaded via file-path `importlib` so
+  `type(s.artefacts[0]) is _ra.R2Artefact` holds across the
+  chain. Pure stdlib + `MappingProxyType`. Pinned by 50 unit tests
+  in `tests/unit/test_r2_aggregate.py`: export surface, frozen
+  dataclasses; input validation (bad `run_dir` type / missing /
+  file-as-dir / half-matching filename / corrupted YAML);
+  empty-run-dir semantics; single-artefact happy path; overall_pass
+  truth table; artefact ordering (sorted, repeatable); 6-case
+  counts-consistency parametrisation; per-axis tally correctness
+  for all four axes; tally sum invariants; all four tally maps are
+  `MappingProxyType` (populated + empty); deterministic
+  stringified-key iteration order; non-recursive discovery;
+  unrelated files skipped; full-matrix 18-combo end-to-end
+  (3 stages × 2 arms × 3 payloads); one-failure variant of same;
+  independence of two run dirs; class-identity pin. Unit gate
+  **1370 passed** (up from 1320). Full `scripts/run_tests.sh`
+  green end-to-end: unit (1370) + colcon test (10 packages) +
+  integration (12 launch tests × {ur5e, ur15}, 301.29s).
+
+- **Prior iteration: R2 artefact discovery helper (closes the "M5
   comparison driver can glob for R2 artefacts without a schema-file
   lookup" seam the `r2_run_artefact` writer docstring pins).** Added
   `tests/integration/r2_find_artefacts.py` exporting one narrow
@@ -1587,11 +1717,11 @@ Still missing on the pre-bake chain:
 
 ## Test status
 
-- Unit tests: `scripts/run_tests.sh --unit-only` — **996 passed**
-  (up from 954; +42 R2 stage-1 gain resolver tests).
+- Unit tests: `scripts/run_tests.sh --unit-only` — **1370 passed**
+  (up from 1320; +50 R2 run-level aggregator tests).
 - Integration tests: re-run this iteration — all **12** launch
   tests green (sim smoke + 3 crisp roles + simple_joint_impedance
-  + cartesian_motion, each × {ur5e, ur15}); ~5:18 wall clock.
+  + cartesian_motion, each × {ur5e, ur15}); ~5:01 wall clock.
 - `colcon test`: **10** packages pass (22 `test_math` gtests +
   4 `test_pseudo_inverse` + 5 `test_filters` gtests from
   `crisp_controllers`).
