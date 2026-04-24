@@ -1,6 +1,66 @@
 # Status
 
-_Last updated: 2026-04-24 (R2 **stage-1 gain resolver** landed as
+_Last updated: 2026-04-24 (R2 **stage-3 cartesian gain resolver**
+landed as `tests/integration/r2_stage3_cartesian_gains.py` + 36 unit
+tests — Cartesian counterpart of the stage-1 gain resolver: closes the
+bringup-YAML → future stage-3 theoretical-response seam for the one
+shipped Cartesian impedance controller, so stage-3 test bodies for
+`crisp_cartesian_impedance` don't open-code `yaml.safe_load` + a
+nested `task.k_{pos,rot}_{x,y,z}` key walk. One narrow function
+`resolve_cartesian_impedance_gains(controller, arm, *, config_dir=None)
+-> dict` returning a fixed two-key shape
+`{"translational": {"x","y","z"}, "rotational": {"x","y","z"}}` of
+finite non-negative floats, read from
+`cartesian_impedance_controller.ros__parameters.task.k_{pos,rot}_{x,y,z}`.
+Scope is intentionally narrow to **one** controller
+(`crisp_cartesian_impedance`): `cartesian_motion` is a position-mode
+controller whose `pd_gains.{trans,rot}_{x,y,z}.p` fields are IK-solver
+proportional gains (different units, different closed-loop semantics),
+and mixing them under the same resolver would invite silent misuse —
+if a future stage-3 test body needs those, it gets its own narrow
+resolver. Task-block damping is out of scope (the task block exposes
+no damping keys; crisp derives cartesian task damping from stiffness
+internally); nullspace / joint-limit-repulsion fields are also out of
+scope (nullspace is already covered for the joint-impedance role by
+`r2_stage1_gains`). Strict validation mirrors stage-1 gains:
+unknown controller/arm → `ValueError`, missing file →
+`FileNotFoundError`, missing key (including any of the six axis keys)
+→ `KeyError` with dotted path, non-mapping top-level / `task` block →
+`ValueError`, non-numeric / `bool` stiffness → `TypeError`, non-finite
+or negative stiffness → `ValueError`, zero stiffness allowed (valid
+"no task stiffness on this axis" request). Fixed key order
+`("translational","rotational")` at the top and `("x","y","z")` in
+each sub-dict so tests can rely on insertion order. Pure stdlib +
+PyYAML (already in-tree per the "python deps" repo memory). Pinned by
+36 unit tests in `tests/unit/test_r2_stage3_cartesian_gains.py`:
+export surface (`__all__`, pinned `SUPPORTED_CONTROLLERS`,
+cross-check `SUPPORTED_ARMS` vs. `expectations_loader`, pinned
+`AXES`); happy-path matrix over both arms against the **committed**
+`bringup/config/crisp_cartesian_impedance.{ur5e,ur15}.yaml` values
+(per-axis equality via re-read `yaml.safe_load`); ur5e=ur15
+cross-arm equality invariant pinning the file comment ("Gains follow
+ur5e for first-light bring-up"); committed-stiffness positivity
+sanity; return-type invariants (plain `dict`, plain-float leaves,
+independent per-call instances, sub-dicts also independent); argument
+rejection matrix (`cartesian_motion` / `crisp_joint_impedance` →
+`ValueError`, unknown arm, missing file); temp-YAML matrix covering
+happy-path, int-coerced-to-float, zero-stiffness-allowed, missing
+top-level key, missing `ros__parameters`, missing `task`, each of the
+six `k_{pos,rot}_{axis}` keys missing, non-mapping top-level,
+non-mapping `task`, negative K, NaN K, inf K, non-numeric K, `bool`
+K (guards against the `bool`-is-`int` gotcha). Unit gate now reports
+**1032 passed** (up from 996). Full `scripts/run_tests.sh` green
+end-to-end: unit (1032) + colcon test (10 packages, 22 `test_math` +
+5 `test_filters` + 4 `test_pseudo_inverse` gtests) + integration (12
+launch tests × {ur5e, ur15}), ~4:59 wall clock for the integration
+slice. With this helper in place, any future R2 stage-3 test body
+for `crisp_cartesian_impedance` that needs per-axis Cartesian
+stiffnesses (e.g. to compute a cartesian second-order TCP response
+analogous to the stage-1 joint-space second-order block) can call
+`gains = resolve_cartesian_impedance_gains("crisp_cartesian_impedance",
+arm)` in one line, rather than re-parsing the bringup YAML._
+
+_Previous iteration: R2 **stage-1 gain resolver** landed as
 `tests/integration/r2_stage1_gains.py` + 42 unit tests — closes the
 last seam between the bringup controller YAMLs and the stage-1
 theoretical-block builder's `stiffness_k`/`damping_d` arguments. One
@@ -400,26 +460,31 @@ FK-injected adapter (`r2_tcp_from_joints.py`), the stage-1
 stage-2 **commanded** all-joints generator (`r2_stage2_commands.py`),
 the IK-injected adapter (`r2_joints_from_tcp.py`), the
 **JTC goal-builder** (`r2_jtc_goal.py`), all three R2
-theoretical-block builders (`r2_stage{1,2,3}_theoretical.py`), and
-now the **stage-1 gain resolver** (`r2_stage1_gains.py` — narrow
+theoretical-block builders (`r2_stage{1,2,3}_theoretical.py`), the
+**stage-1 gain resolver** (`r2_stage1_gains.py` — narrow
 `resolve_joint_impedance_gains(controller, arm)` against the
 committed `bringup/config/{simple,crisp}_joint_impedance.{ur5e,ur15}.yaml`,
 auto-filling critical damping for negative `d` / `nullspace.damping:
--1.0`), M6.12 (R2 stage-1), the joint-space path of M6.13 (R2 stage-2),
-and **both** paths of M6.14 (R2 stage-3 `cartesian_motion` via the
-direct TCP commanded generators **and** `JTC + ik_shim` via the IK
-adapter) can all be authored end-to-end as sim-collection
-orchestrators — the remaining seam is a thin ROS-side
+-1.0`), and now the **stage-3 cartesian gain resolver**
+(`r2_stage3_cartesian_gains.py` — narrow
+`resolve_cartesian_impedance_gains(controller, arm)` against the
+committed `bringup/config/crisp_cartesian_impedance.{ur5e,ur15}.yaml`,
+returning per-axis translational/rotational stiffnesses), M6.12 (R2
+stage-1), the joint-space path of M6.13 (R2 stage-2), and **both**
+paths of M6.14 (R2 stage-3 `cartesian_motion` via the direct TCP
+commanded generators **and** `JTC + ik_shim` via the IK adapter) can
+all be authored end-to-end as sim-collection orchestrators — the
+remaining seam is a thin ROS-side
 `JointTrajectoryGoal -> FollowJointTrajectory.Goal`
 materialiser which by design lives outside the pre-bake chain so it
 can import `trajectory_msgs` at test-run time.
 
 Still missing on the pre-bake chain:
 
-1. ~~R2 stage-1 gain resolver~~ — **landed this iteration** as
-   `r2_stage1_gains.py` (see top-of-file summary). Stage-1 test
-   bodies now resolve `(K, D)` from the committed bringup YAMLs in
-   one call.
+1. ~~R2 stage-3 cartesian gain resolver~~ — **landed this iteration** as
+   `r2_stage3_cartesian_gains.py` (see top-of-file summary). Future
+   stage-3 `crisp_cartesian_impedance` test bodies now resolve
+   per-axis Cartesian task stiffnesses in one call.
 2. The concrete FK **and** IK backends themselves — both adapters
    deliberately keep these out of tree so the source / licensing
    decision is independent of the orchestrator wiring.
@@ -435,10 +500,58 @@ Still missing on the pre-bake chain:
    materialiser — by design lives outside the pre-bake chain so
    it can import `ur_sim_msgs` (and decide whether to use
    `geometry_msgs/Inertia` instead) at test-run time.
+5. A cartesian stage-3 theoretical-response extension for
+   `cartesian_second_order` (would consume the stiffnesses this
+   iteration's resolver returns). Deferred — stage-3 theoretical
+   currently emits `tcp_trajectory_tracking` only, which suffices
+   for the `cartesian_motion` position-mode and `JTC + ik_shim`
+   paths and for the free-space-drift tolerance on
+   `crisp_cartesian_impedance`.
 
 ## Last completed tasks
 
-- **This iteration: R2 stage-1 gain resolver (closes the bringup-
+- **This iteration: R2 stage-3 cartesian gain resolver (closes the
+  bringup-controller-YAML → future stage-3 cartesian-response seam
+  for `crisp_cartesian_impedance`).** Added
+  `tests/integration/r2_stage3_cartesian_gains.py` exporting a single
+  narrow function `resolve_cartesian_impedance_gains(controller,
+  arm, *, config_dir=None) -> dict` plus pinned
+  `SUPPORTED_CONTROLLERS = ("crisp_cartesian_impedance",)`,
+  `SUPPORTED_ARMS`, `AXES = ("x","y","z")`, and
+  `DEFAULT_CONFIG_DIR = bringup/config`. Returns a fixed two-key
+  shape `{"translational": {"x","y","z"}, "rotational":
+  {"x","y","z"}}` of finite non-negative floats, read from
+  `cartesian_impedance_controller.ros__parameters.task.k_{pos,rot}_{x,y,z}`.
+  Scope is intentionally narrow to **one** controller:
+  `cartesian_motion` is a position-mode controller whose
+  `pd_gains.{trans,rot}_{x,y,z}.p` fields are IK-solver proportional
+  gains (different units, different closed-loop semantics), and
+  mixing them under the same resolver would invite silent misuse.
+  Task-block damping is out of scope (the task block exposes no
+  damping keys); nullspace / joint-limit-repulsion fields are also
+  out of scope (nullspace for the joint-impedance role is already
+  covered by `r2_stage1_gains`). Strict validation mirrors stage-1
+  gains: unknown controller/arm → `ValueError`, missing file →
+  `FileNotFoundError`, missing key (including any of the six axis
+  keys) → `KeyError` with dotted path, non-mapping top-level /
+  `task` block → `ValueError`, non-numeric / `bool` stiffness →
+  `TypeError`, non-finite or negative stiffness → `ValueError`,
+  zero stiffness allowed. Pure stdlib + PyYAML. Pinned by 36 unit
+  tests in `tests/unit/test_r2_stage3_cartesian_gains.py`: export
+  surface; happy-path matrix over both arms against the
+  **committed** `bringup/config/crisp_cartesian_impedance.{ur5e,ur15}.yaml`
+  values; ur5e=ur15 cross-arm equality invariant pinning the file
+  comment ("Gains follow ur5e for first-light bring-up"); positivity
+  sanity; return-type invariants (plain `dict`, plain-float leaves,
+  independent per-call instances); argument rejection matrix
+  (`cartesian_motion` / `crisp_joint_impedance` → `ValueError`,
+  unknown arm, missing file); full temp-YAML error matrix (int-
+  coerced-to-float, zero-allowed, every axis key missing, non-
+  mapping top-level / task, negative / NaN / inf / non-numeric /
+  `bool` K). Unit gate **1032 passed** (up from 996). Full
+  `scripts/run_tests.sh` green end-to-end.
+
+- **Prior iteration: R2 stage-1 gain resolver (closes the bringup-
   controller-YAML → `r2_stage1_theoretical` seam so stage-1 test
   bodies don't open-code `yaml.safe_load` + key-walk).** Added
   `tests/integration/r2_stage1_gains.py` exporting a single narrow
