@@ -1,6 +1,96 @@
 # Status
 
-_Last updated: 2026-04-24 (R2 **bulk results writer** landed as
+_Last updated: 2026-04-25 (R2 **stage → controllers catalog** landed
+as `tests/integration/r2_stage_controllers.py` + 60 unit tests —
+closes the "live R2 orchestrator needs to enumerate which controllers
+each stage exercises" seam that the M5-analogue R2 driver would
+otherwise have to hardcode. Pairs with the existing
+`r3_payload_parametrize` (arm × payload axis) to give the
+orchestrator the four independent matrix axes in two narrow modules.
+Exposes `SUPPORTED_STAGES = (1, 2, 3)`, `STAGE_CONTROLLERS: Mapping[
+int, tuple[str, ...]]` (MappingProxyType, pinned per ROADMAP §M6.R2),
+`JTC_IK_SHIM_VARIANT = "joint_trajectory_controller_ik_shim"`, plus
+`controllers_for_stage(stage)`, `stages_for_controller(name)`,
+`all_controllers()`, and `expectation_key(variant)`. Stage 1 (M6.12):
+`joint_trajectory_controller`, `forward_position_controller`,
+`forward_effort_controller`, `crisp_joint_impedance`,
+`simple_joint_impedance` — ROADMAP-scoped, deliberately omits
+`forward_velocity_controller` (declared in `expectations/*.yaml` but
+not listed in M6.12). Stage 2 (M6.13): stage-1 set plus
+`cartesian_motion_controller` (ROADMAP R2 stage 2 covers joint-space
+and cartesian-mode branches; see the `stage2_tcp` block in
+`expectations/*.yaml` and `r2_stage2_cartesian.py`). Stage 3
+(M6.14): `cartesian_motion_controller`, `JTC_IK_SHIM_VARIANT`,
+`crisp_cartesian_impedance`. The JTC+IK-shim variant uses a **distinct
+catalog name** from the plain `joint_trajectory_controller` used in
+stages 1/2 so the artefact `controller` key and the by-controller
+aggregation in `aggregate_r2_run` stay unambiguous — a stage-3 JTC
+run and a stage-1 JTC run land in different report rows.
+`expectation_key(JTC_IK_SHIM_VARIANT)` returns
+`"joint_trajectory_controller"` so a caller chaining
+`controllers_for_stage(3)` into `ArmExpectation.controller(
+expectation_key(v))` still resolves without a stage-specific
+if-branch. `stages_for_controller` returns `()` for an unknown
+controller so the orchestrator can treat "not in the R2 matrix" as
+`skip` without an extra guard; return order always matches
+`SUPPORTED_STAGES`. Pure stdlib + `MappingProxyType`; no PyYAML /
+numpy / ROS imports in this module (the expectations loader brings
+its own PyYAML dependency). Error prefix is `r2_stage_controllers:`
+on every `TypeError` / `ValueError`, matching the rest of the R2
+pre-bake chain so a consumer grep-ing a stack trace can locate the
+layer that rejected them. Pinned by 60 unit tests in
+`tests/unit/test_r2_stage_controllers.py`: export surface
+(`__all__`, module-level constants pinned); `STAGE_CONTROLLERS`
+shape (MappingProxyType, immutable, keys == `SUPPORTED_STAGES`,
+stage-1 / stage-2 / stage-3 membership pinned verbatim, stage-2
+superset-of-stage-1 with `cartesian_motion_controller` added,
+stage-2 ordering preserves the stage-1 prefix, stage-1 explicitly
+excludes `forward_velocity_controller`, stage 3 excludes plain JTC
+and includes the IK-shim variant, each stage's entries unique and
+non-empty strs with no `/` or whitespace); `controllers_for_stage`
+(happy path × 3 stages, same tuple object returned across calls,
+unknown-stage 4-case parametrise → `ValueError`, non-int 5-case
+parametrise → `TypeError`, bool-as-int rejected); `stages_for_
+controller` (joint-space controllers → `(1, 2)`, JTC → `(1, 2)`,
+cartesian_motion → `(2, 3)`, JTC_IK_SHIM_VARIANT / crisp_cartesian →
+`(3,)`, unknown name → `()`, non-str `TypeError`, empty str
+`ValueError`, return order is `SUPPORTED_STAGES` order); full
+inverse consistency between `stages_for_controller` ↔
+`controllers_for_stage` (for every `(stage, controller)` pair in
+`STAGE_CONTROLLERS`, both directions agree); `all_controllers`
+(sorted, unique, equals the union of stage sets, deterministic across
+calls, contains every known entry); `expectation_key` (identity for
+the 7 non-shim variants via parametrise, JTC_IK_SHIM_VARIANT →
+`"joint_trajectory_controller"`, non-str / empty / unknown
+rejections); and two cross-module alignment tests that exercise
+`expectations_loader.load_arm(arm).controller(expectation_key(
+variant))` for every stage-1 entry and for the stage-3 IK-shim
+variant on both `ur5e` and `ur15`, so a future stage-1 test body
+chaining `controllers_for_stage(1)` → `ArmExpectation.controller`
+cannot hit a missing-row error at run-time. Unit gate now reports
+**1522 passed** (up from 1462). Full `scripts/run_tests.sh` green
+end-to-end: unit (1522) + colcon test (10 packages, 22 `test_math`
++ 5 `test_filters` + 4 `test_pseudo_inverse` gtests) + integration
+(12 launch tests × {ur5e, ur15}, 318.42s). With this catalog in
+place plus `r3_payload_parametrize`, the future live R2 orchestrator
+reduces to: `for stage in SUPPORTED_STAGES: for (arm, payload) in
+arm_payload_combinations(): for variant in controllers_for_stage(
+stage): ...` — no more stage-specific controller lists at the
+consumer, no more stage-3-specific if-branch for the IK-shim path,
+no more hidden coupling between the catalog and the expectation
+YAML key. The pre-bake chain's only remaining open seams are the
+concrete FK/IK backends (deliberately kept out of tree so the
+source / licensing decision is independent of the orchestrator
+wiring), the ROS-side `JointTrajectoryGoal →
+FollowJointTrajectory.Goal` and `EePayloadMessage →
+ur_sim_msgs/EePayload` materialisers (by design kept outside the
+pre-bake chain so they can import `trajectory_msgs` / `ur_sim_msgs`
+at test-run time), and M6.19 payload-parametrisation of the R2
+stage bodies (needs M6.16–M6.18 to land first, which are gated on
+M6.0). M6.0 operator gate remains active for every bullet that
+touches the live sim._
+
+_Previous iteration: R2 **bulk results writer** landed as
 `tests/integration/r2_write_results.py` + 38 unit tests — closes the
 "live orchestrator has a batch of stage results + per-combo context
 and needs to deposit them as YAML artefacts in one R2 run directory"
