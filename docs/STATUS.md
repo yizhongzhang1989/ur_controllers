@@ -1,6 +1,58 @@
 # Status
 
-_Last updated: 2026-04-24 (R2 run-artefact writer landed as
+_Last updated: 2026-04-24 (R2 **result → artefact bridge** landed as
+`tests/integration/r2_result_to_artefact.py` + 57 unit tests — closes
+the last remaining seam between the four stage assertion harnesses
+and the `R2Artefact` writer. Exports a single function
+`result_to_artefact(*, stage, arm, controller, payload, theoretical,
+result, metadata=None) -> R2Artefact`. Dispatches on `stage`:
+`stage=1` → `Stage1Result` (adds `joint` to metadata); `stage=2` →
+`Stage2Result` (flattens per-joint metrics into `{joint}.{metric}`
+keys and records the joint ordering under `metadata['joints']`) or
+`Stage2CartesianResult` (metrics pass through as-is); `stage=3` →
+`TcpStage3Result` (attaches non-empty `notes` under
+`metadata['stage3_notes']`). `passed` / `reasons` come from
+`result.ok` / `result.failures` (stage-2 uses the `Stage2Result.failures`
+property that already flattens per-joint failures as
+`"{joint}: {msg}"`). Theoretical is caller-supplied — the bridge
+carries it through unchanged, so the module stays uncoupled from the
+expectation YAML schema. Echo check: `result.controller` must match
+the `controller` argument, else `ValueError` (otherwise the
+artefact's filename and its embedded `controller` key would point
+at different things). Metadata clashes on reserved keys (`joint`,
+`joints`, `stage3_notes`) raise instead of silently overwriting —
+caller intent is ambiguous. Argument rejection: `stage` must be
+`int` in `SUPPORTED_STAGES` (not `bool`); `arm` / `controller` /
+`payload` must be non-empty `str`; `theoretical` must be a
+`Mapping`; `metadata` must be a `Mapping` or `None`. Pure stdlib;
+siblings resolved via a sys.modules-first `_load_sibling` (plain
+name first, namespaced fallback) so `isinstance` works across both
+the unit-test's direct `spec_from_file_location` load and the
+bridge's own namespaced load — pinned by explicit round-trip tests
+through `write_r2_artefact`. Pinned by 57 unit tests in
+`tests/unit/test_r2_result_to_artefact.py`: export surface; happy
+paths for all four result types (pass + fail); controller-echo
+mismatches across all four types; stage↔result-type mismatches
+(stage=1 with cartesian, stage=2 with TcpStage3, stage=3 with
+Stage1); stage-2 per-joint flattening (including empty
+`per_joint`); joints-ordering metadata; reserved-key clashes for
+`joint` / `joints` / `stage3_notes`; metadata carry-through on the
+cartesian stage-2 branch (no reserved key added); stage-3 notes
+propagation with and without notes; full argument rejection matrix
+(`stage`, `arm`, `controller`, `payload`, `theoretical`,
+`metadata` types); `metadata=None` normalisation; and three
+end-to-end round-trips through `write_r2_artefact` + `yaml.safe_load`
+for stage-1, stage-2 joint-space, and stage-3-with-notes. Unit gate
+now reports **853 passed** (up from 796). Full `scripts/run_tests.sh`
+green end-to-end: unit (853) + colcon test (10 packages, 22
+`test_math` + 5 `test_filters` + 4 `test_pseudo_inverse` gtests) +
+integration (12 launch tests × {ur5e, ur15}), ~4:46 wall clock for
+the integration slice. With the bridge in place, any future R2
+test body is one call (`evaluate_*` → `result_to_artefact` →
+`write_r2_artefact`) from sim-collected traces to an on-disk run
+artefact.)_
+
+_Previous iteration: R2 run-artefact writer landed as
 `tests/integration/r2_run_artefact.py` + 55 unit tests — closes the
 seam called out verbatim in ROADMAP §"M6 hard requirements" R2:
 "Each stage must publish, in the run artefact under
@@ -166,7 +218,28 @@ Still missing on the pre-bake chain:
 
 ## Last completed tasks
 
-- **This iteration: R2 run-artefact writer (closes the R2
+- **This iteration: R2 result → artefact bridge (closes the last
+  stage-harness → writer seam).** Added
+  `tests/integration/r2_result_to_artefact.py` exporting a single
+  function `result_to_artefact(*, stage, arm, controller, payload,
+  theoretical, result, metadata=None) -> R2Artefact`. Dispatches on
+  `stage`: `stage=1` → `Stage1Result` (adds `joint` to metadata);
+  `stage=2` → `Stage2Result` (flattens per-joint metrics into
+  `{joint}.{metric}` keys, records ordering under
+  `metadata['joints']`) or `Stage2CartesianResult` (pass-through);
+  `stage=3` → `TcpStage3Result` (non-empty `notes` attached under
+  `metadata['stage3_notes']`). `passed` / `reasons` pulled from
+  `result.ok` / `result.failures`. Controller-echo check, reserved
+  metadata keys raise on clash, full argument rejection matrix.
+  Sibling loader checks `sys.modules` for the plain name first
+  (namespaced fallback for isolation) so `isinstance` works across
+  both the unit-test direct loader and the bridge's own loader —
+  pinned by 3 round-trip tests through `write_r2_artefact`. Pure
+  stdlib. Pinned by 57 unit tests in
+  `tests/unit/test_r2_result_to_artefact.py` — unit gate now
+  reports **853 passed** (up from 796).
+
+- **Prior iteration: R2 run-artefact writer (closes the R2
   "publish theoretical alongside measured" seam).** Added
   `tests/integration/r2_run_artefact.py` exporting the frozen
   dataclass `R2Artefact` + `write_r2_artefact(run_dir, artefact,
