@@ -1,16 +1,20 @@
 # Status
 
-_Last updated: 2026-04-24 (R3 payload validator pre-bake landed as
-`tests/integration/payload_validation.py` + 40 unit tests — closes
-the preflight seam shared by M6.16 (`~/set_ee_payload` service input
-validation) and M6.17 (MJCF body-attachment preflight). Pure stdlib
-`validate_payload` / `validate_catalog` enforce v1 physical-validity
-rules: finite mass ≥ 0, finite diagonal inertia, v1 diagonal-only
-tensor (off-diagonals exactly 0.0), sentinel consistency
-(mass == 0 ⇔ inertia == 0), v1 modelling constraint (mass > 0 ⇒
-every principal moment > 0 — no point masses), triangle inequality
-on principal moments, finite pose, and catalog-level unique names.
-Interop test validates the in-tree `payloads.yaml` end-to-end. M6.0
+_Last updated: 2026-04-24 (R3 MJCF payload body emitter landed as
+`tests/integration/r3_payload_mjcf.py` + 34 unit tests — pre-bakes
+the MJCF-string seam of M6.17 ("attach a body with the configured
+mass / inertia / pose to `tool0`"). Pure-stdlib
+`payload_body_mjcf(payload, *, body_name="ee_payload") -> str`
+validates via the just-landed `payload_validation.validate_payload`,
+returns the empty string for zero-mass payloads (honours the
+ROADMAP-R3 "zero-mass case = no body injected" rule so the
+`no_payload` baseline leaves the MJCF byte-identical), and otherwise
+emits a `<body>` snippet carrying MuJoCo-standard `pos`, Hamilton
+`quat` (intrinsic XYZ Euler → (w, x, y, z) closed-form, verified on
+identity + X/Y/Z axis rotations + a composed r=p=π/2, y=0 case),
+and a single `<inertial>` child with `mass` + `diaginertia`. `quat`
+is used in preference to `euler` so the result is independent of
+the enclosing MJCF's `<compiler eulerseq="...">` setting. M6.0
 operator gate still active for every bullet that requires live sim
 changes.)._
 
@@ -80,7 +84,59 @@ Still missing on the pre-bake chain:
 
 ## Last completed tasks
 
-- **This iteration: R3 payload validator pre-bake (closes the
+- **This iteration: R3 MJCF payload body emitter (pre-bakes M6.17
+  string-assembly seam).** Added
+  `tests/integration/r3_payload_mjcf.py` exporting
+  `payload_body_mjcf(payload, *, body_name="ee_payload") -> str`
+  and a `DEFAULT_BODY_NAME = "ee_payload"` constant. Given a
+  validated :class:`Payload`, emits a single-line, well-formed MJCF
+  `<body>` snippet suitable to splice as a child of any MuJoCo
+  body (in our case `tool0`). Attributes: `name` (from
+  `body_name`), `pos="x y z"` (metres, from `pose_xyz`), `quat="w
+  x y z"` (Hamilton order, derived from `pose_rpy` via the
+  closed-form intrinsic XYZ Euler product `qx(r) ⊗ qy(p) ⊗
+  qz(y)`). Exactly one `<inertial pos="0 0 0" mass="M"
+  diaginertia="ixx iyy izz"/>` child. Zero-mass payloads return
+  `""` (sentinel — validator pins `mass == 0 ⇔ inertia == 0`, so
+  `no_payload` produces no body and leaves the MJCF byte-identical
+  to the pre-attachment tree). Re-runs `validate_payload` on entry
+  so invalid inputs are rejected at this seam rather than mutating
+  the MJCF. `body_name` must be a non-empty whitespace-free `str`
+  (MJCF identifiers are whitespace-free; accepting whitespace
+  would silently break downstream MJCF parsers). `%.15g` numeric
+  formatting gives round-trip precision without repr-noise zeros.
+  Uses `quat` in preference to `euler` so the snippet is
+  independent of the enclosing MJCF's `<compiler eulerseq="...">`
+  setting. Pure stdlib; imports only `math` and the sibling
+  `payload_validation.validate_payload` + loader `Payload`
+  dataclass. Pinned by 34 unit tests in
+  `tests/unit/test_r3_payload_mjcf.py`: export surface
+  (`__all__`, callable, default constant), zero-mass empty-string
+  emission (synthetic + in-tree `no_payload`, including
+  `body_name` ignored for zero-mass), positive-mass happy path
+  (well-formed XML via `xml.etree.ElementTree`, attribute values,
+  exactly-one `<inertial>` child), `body_name` override, both
+  in-tree positive payloads round-trip (`small_payload` at z =
+  0.05 m, 1 kg, diag 1.67e-3; `large_payload` at z = 0.1 m, 5 kg,
+  diag 2.44e-2), quat identity for `rpy=(0,0,0)`, canonical
+  rotations about each axis (`Rx`, `Ry`, `Rz` at `π/2`) with
+  closed-form checks to `abs=1e-12`, unit-norm invariant for an
+  arbitrary rotation, composed rotations (`r=π/2, p=π/2, y=0` →
+  `(0.5, 0.5, 0.5, 0.5)`; `r=p=y=π/2` → `(0, √2/2, 0, √2/2)`),
+  negative `pose_xyz` components, 15-significant-digit precision,
+  the full `body_name` rejection matrix (empty, single-space,
+  embedded spaces/tabs/newlines, non-str types including `None`,
+  `int`, `float`, `bytes`, `list`), validator propagation
+  (negative mass, non-diagonal `ixy`, NaN in `pose_xyz`,
+  zero-mass-with-nonzero-inertia), and snippet-shape sanity
+  (single-line, no leading/trailing whitespace, exactly-one
+  `inertial` child, emitted `name` matches `DEFAULT_BODY_NAME`).
+  Unit gate now reports **596 passed** (up from 562). Full
+  `scripts/run_tests.sh` green end-to-end: unit (596) + colcon
+  test (10 packages, 22 `test_math` + 5 `test_filters` + 4
+  `test_pseudo_inverse` gtests) + integration (12 launch tests ×
+  {ur5e, ur15}), ~4:51 wall clock for the integration slice.
+- **Prior iteration: R3 payload validator pre-bake (closes the
   preflight seam shared by M6.16 + M6.17).** Added
   `tests/integration/payload_validation.py` exporting
   `validate_payload(payload: Payload) -> None` and
@@ -414,8 +470,8 @@ Still missing on the pre-bake chain:
 
 ## Test status
 
-- Unit tests: `scripts/run_tests.sh --unit-only` — **562 passed**
-  (up from 522; +40 payload-validator tests).
+- Unit tests: `scripts/run_tests.sh --unit-only` — **596 passed**
+  (up from 562; +34 MJCF emitter tests).
 - Integration tests: re-run this iteration — all **12** launch
   tests green (sim smoke + 3 crisp roles + simple_joint_impedance
   + cartesian_motion, each × {ur5e, ur15}); ~4:50 wall clock.
