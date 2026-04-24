@@ -1,6 +1,109 @@
 # Status
 
-_Last updated: 2026-04-24 (R2 **run-level aggregator** landed as
+_Last updated: 2026-04-24 (R2 **run-report writer** landed as
+`tests/integration/r2_report_writer.py` + 54 unit tests — closes the
+"future R2 CSV / Markdown report writer over `R2RunSummary`
+(analogous to M5's `evaluation/compare.py::render_report`)" seam
+the previous iteration's aggregator docstring pins (module
+docstring, lines ~26-30). Exposes three narrow functions —
+`write_r2_report_csv(path, summary)`,
+`write_r2_report_markdown(path, summary, *, generated_at_utc=None)`,
+and the convenience `write_r2_reports(report_dir, summary, *,
+generated_at_utc=None) -> (csv_path, md_path)` — plus three pinned
+module constants: `CSV_HEADER` (7 columns: `stage`, `arm`,
+`controller`, `payload`, `passed`, `reasons`, `artefact_filename`),
+`REPORT_CSV_NAME = "report.csv"`, and `REPORT_MD_NAME = "report.md"`.
+The CSV preserves the summary's deterministic artefact order
+(sorted by filesystem path, inherited from `find_r2_artefacts`) so a
+downstream consumer can join on row index; each row's
+`artefact_filename` is derived via `r2_run_artefact.artefact_filename`
+so the CSV is decoupled from the on-disk path and stays valid across
+directory moves. The Markdown renders **failures-first**: top-level
+heading, optional `Generated:` line, `Run directory`, a bold
+`Overall: PASS|FAIL` one-liner with `total/passed/failed`, a
+`## Status summary` section with four per-axis tally tables
+(`by_stage` / `by_arm` / `by_controller` / `by_payload` — each with
+a `_No artefacts._` placeholder when its map is empty), a
+`## Failures` section that lists every failing artefact with its
+reasons (or `_No failures._` when overall_pass is True), and a
+`## Artefacts` full matrix table at the bottom using ✅/❌ verdict
+glyphs. Reasons containing `|` are escaped to `\|` so a rogue pipe
+cannot break the Markdown table layout; newlines in reasons are
+flattened. Both writers create parent directories with
+`parents=True, exist_ok=True` and silently overwrite existing
+files (a report is an output artefact, not a log). The CSV is
+deterministic by construction — uses `csv.writer` with an explicit
+LF (`\n`) line terminator, routed through an in-memory
+`io.StringIO` buffer so a mid-iteration failure never half-writes a
+partial file, and no per-row timestamp. The Markdown is also
+deterministic: `generated_at_utc` is caller-supplied (never computed
+inside the writer) so the same summary round-trips to byte-identical
+output across two consecutive calls. Validation: non-Path `path` /
+`report_dir` → `TypeError` with `r2_report_writer: path must be
+pathlib.Path`; non-`R2RunSummary` `summary` (isinstance check
+against the shared aggregator class identity) →
+`TypeError` with `r2_report_writer: summary must be an
+r2_aggregate.R2RunSummary`; non-str non-None `generated_at_utc` →
+`TypeError` with `r2_report_writer: generated_at_utc must be str or
+None`. Sibling modules loaded via file-path `importlib` with plain
+module-name keys (matching the `r2_aggregate` / `r2_read_artefact`
+convention — see the "module loading" repo memory), so the
+`R2Artefact` / `R2RunSummary` class identities are shared across
+the chain and a future live R2 driver (the R2 analogue of
+`evaluation/compare.py`) can pass its aggregator output straight to
+the report writer without a bridge. Pure stdlib: `csv`, `io`,
+`pathlib`, `importlib`; no PyYAML / numpy / ROS imports in this
+module (the reader chain brings its own PyYAML dependency).
+Pinned by 54 unit tests in `tests/unit/test_r2_report_writer.py`:
+export surface (`__all__`, `CSV_HEADER`, `REPORT_CSV_NAME`,
+`REPORT_MD_NAME`); input validation (non-Path `path` / `report_dir`
+as `None` / str / int / object via 4-case parametrise → `TypeError`;
+non-`R2RunSummary` summary via 5-case parametrise → `TypeError`;
+non-str `generated_at_utc` → `TypeError`; same checks on the
+convenience driver); CSV happy path (empty run dir → header-only;
+single passing row; single failing row with multi-item reasons
+joined via `"; "`; scrambled-write order matches summary order;
+deterministic across two writes; reasons with embedded `|` / `,`
+round-trip through `csv.reader`; `passed` tokens are literal
+`true`/`false`; parent-dir auto-creation; overwrite semantics;
+LF-only line endings with exact line count); Markdown happy path
+(empty run dir → `Overall: **FAIL**`, `_No failures._`, `_No
+artefacts found..._`; all-passed → `Overall: **PASS**`; single
+failure surfaced in its own section *before* the Artefacts table;
+all four tally tables render with their column headers; empty-map
+tally tables show `_No artefacts._` placeholder four times; tally
+rows have correct counts for a hand-picked `stage1 pass/fail + stage2
+pass` fixture; `Generated:` line present when supplied, absent when
+omitted; embedded `|` in reasons escaped; deterministic across two
+writes; trailing newline; parent-dir auto-creation; overwrite
+semantics; ✅/❌ glyphs in the artefact table); `write_r2_reports`
+convenience (emits both files at the expected names; creates deeply
+nested `report_dir`; forwards `generated_at_utc` to the Markdown
+writer only; CSV round-trip yields `header + N` rows); and two
+end-to-end full-matrix tests (18-combo 3×2×3 sweep → CSV has
+19 rows, Markdown surfaces every stage, arm, controller, and
+payload in its tally tables). Unit gate now reports **1424 passed**
+(up from 1370). Full `scripts/run_tests.sh` green end-to-end: unit
+(1424) + colcon test (10 packages, 22 `test_math` + 5 `test_filters`
++ 4 `test_pseudo_inverse` gtests) + integration (12 launch tests ×
+{ur5e, ur15}, 343.93s). With this writer in place, the future live
+R2 orchestrator (M5-analogue) reduces to: spin sim per combo, drive
+the R2 harness, write artefacts via `write_r2_artefact`, then
+call `aggregate_r2_run` + `write_r2_reports` to produce the report
+— **no more open-coded rendering, tally accumulation, or row
+ordering at the consumer**. The pre-bake chain's only remaining
+open seams are the concrete FK/IK backends (deliberately kept out
+of tree so the source / licensing decision is independent of the
+orchestrator wiring), the ROS-side `JointTrajectoryGoal →
+FollowJointTrajectory.Goal` and `EePayloadMessage →
+ur_sim_msgs/EePayload` materialisers (by design kept outside the
+pre-bake chain so they can import `trajectory_msgs` / `ur_sim_msgs`
+at test-run time), and M6.19 payload-parametrisation of the R2
+stage bodies (needs M6.16–M6.18 to land first, which are gated on
+M6.0). M6.0 operator gate remains active for every bullet that
+touches the live sim._
+
+_Previous iteration: R2 **run-level aggregator** landed as
 `tests/integration/r2_aggregate.py` + 50 unit tests — closes the
 "future M5-like R2 aggregation driver (analogous to
 `evaluation/compare.py` over R2 artefacts)" seam the
@@ -822,10 +925,7 @@ Still missing on the pre-bake chain:
 3. ~~R2 artefact discovery helper~~ — landed as
    `r2_find_artefacts.py`.
 4. ~~R2 artefact reader~~ — landed as `r2_read_artefact.py`.
-5. ~~R2 run-level aggregator~~ — **landed this iteration** as
-   `r2_aggregate.py` (see top-of-file summary). Future R2
-   CSV / Markdown report writers now reduce to a pure rendering
-   pass over `R2RunSummary`.
+5. ~~R2 run-level aggregator~~ — landed as `r2_aggregate.py`.
 6. The concrete FK **and** IK backends themselves — both adapters
    deliberately keep these out of tree so the source / licensing
    decision is independent of the orchestrator wiring.
@@ -848,9 +948,9 @@ Still missing on the pre-bake chain:
    which suffices for the `cartesian_motion` position-mode and
    `JTC + ik_shim` paths and for the free-space-drift tolerance
    on `crisp_cartesian_impedance`.
-10. An R2 CSV / Markdown report writer over `R2RunSummary`
-    (analogous to M5's `evaluation/compare.py::render_report`).
-    Natural next pre-bake step now that aggregation lands.
+10. ~~R2 CSV / Markdown report writer over `R2RunSummary`~~ —
+    **landed this iteration** as `r2_report_writer.py`. A future
+    live R2 orchestrator now has a one-call rendering seam.
 
 ## Last completed tasks
 
