@@ -1,6 +1,86 @@
 # Status
 
-_Last updated: 2026-04-24 (R2 **stage-3 cartesian gain resolver**
+_Last updated: 2026-04-24 (R2 **run-directory helper** landed as
+`tests/integration/r2_run_dir.py` + 47 unit tests — closes the
+"caller decides run_dir" seam the `r2_run_artefact` writer docstring
+explicitly defers to: "the M5 compare driver already picks a UTC
+timestamp; R2 tests will reuse that convention". One narrow function
+`make_r2_run_dir(runs_root=None, *, clock=None, prefix="r2",
+suffix=None, exist_ok=False) -> Path` that picks a UTC timestamp,
+builds the canonical directory name
+`<runs_root>/<prefix>__<UTC-ts>[__<suffix>]`, creates the directory,
+and returns the `Path`. Timestamp format is pinned verbatim to
+`TS_FORMAT = "%Y%m%dT%H%M%SZ"` — the format
+`evaluation/run_evaluation.py::make_run_dir` already writes — so the
+M5 compare driver's `find_latest_run_dir` lexicographic sort keeps
+working across R2 artefacts in the same `runs/` tree (pinned by a
+dedicated chronological-sort invariant test). `runs_root` defaults to
+`<repo>/evaluation/runs` (gitignored), created on demand. Optional
+`suffix` (appended as `__<suffix>` *after* the timestamp) exists so
+parallel R2 sweeps started in the same UTC second — e.g. one worker
+per `{arm, payload}` in a pytest-xdist pool — can be disambiguated
+without touching the timestamp. `exist_ok=False` by default so
+sub-second collisions surface as `FileExistsError` instead of
+silently co-mingling artefacts from two unrelated runs; callers that
+genuinely want to reuse a pre-existing directory pass
+`exist_ok=True`. `clock` is injectable (`Callable[[], datetime]`) so
+unit tests pin the timestamp without monkey-patching `datetime`.
+Strict validation mirrors the rest of the R2 pre-bake chain:
+`runs_root` must be `None` or `pathlib.Path` (str rejected —
+"one canonical path type" across the chain), `prefix`/`suffix` must
+be non-empty `str` with no `/`, `\`, `__`, or surrounding whitespace
+(the `__` ban protects the field separator so artefact globs stay
+unambiguous), `clock()` must return a UTC-aware `datetime` (naive or
+non-UTC rejected — the TS format drops tzinfo and would silently
+mislabel a non-UTC stamp), `exist_ok` must be `bool`. Pure stdlib;
+no PyYAML / numpy / ROS imports. Pinned by 47 unit tests in
+`tests/unit/test_r2_run_dir.py`: export surface (`__all__`,
+`TS_FORMAT == "%Y%m%dT%H%M%SZ"` verbatim match with M5,
+`DEFAULT_PREFIX == "r2"`, `DEFAULT_RUNS_ROOT` resolves to
+`<repo>/evaluation/runs`); happy-path matrix (default dir creation,
+`Path` return type, missing `runs_root` auto-created with parents,
+custom prefix, suffix appended *after* timestamp, prefix+suffix
+together, `None` `runs_root` falls back to `DEFAULT_RUNS_ROOT`
+monkey-patched to `tmp_path`, default clock produces a
+TS_FORMAT-matching stamp within ±1s of wall-clock `now`); collision
+handling (second call with same clock raises `FileExistsError`;
+`exist_ok=True` returns the same directory); lexicographic-sort
+invariant pinning the justification for M5's `find_latest_run_dir`
+(four timestamps across two days sort chronologically as plain
+`sorted()`); validation matrix (str-as-runs_root → `TypeError`,
+int-as-runs_root → `TypeError`, empty / slash / backslash / `__` /
+leading-ws / trailing-ws prefix or suffix → `ValueError`,
+non-str prefix or suffix → `TypeError`, `suffix=None` permitted and
+produces exactly one `__` separator, non-callable clock →
+`TypeError`, clock returning non-datetime → `TypeError`, clock
+returning naive datetime → `ValueError`, clock returning non-UTC
+datetime → `ValueError`, non-bool `exist_ok` incl. `0`/`1`/`"yes"`/
+`None`/`[True]` → `TypeError`); and an end-to-end compose test that
+feeds the returned path straight into
+`r2_run_artefact.write_r2_artefact(run_dir, R2Artefact(...))` +
+`yaml.safe_load` — proving the helper's output needs no glue to
+chain into the writer. Unit gate now reports **1079 passed** (up
+from 1032). Full `scripts/run_tests.sh` green end-to-end: unit
+(1079) + colcon test (10 packages, 22 `test_math` + 5 `test_filters`
++ 4 `test_pseudo_inverse` gtests) + integration (12 launch tests ×
+{ur5e, ur15}, 340.21s). With this helper in place, any future R2
+test body (M6.12 / M6.13 / M6.14) reduces to:
+`run_dir = make_r2_run_dir()` → (per combination)
+`result = evaluate_*(...)` → `theoretical = theoretical_for_stage*(...)` →
+`artefact = result_to_artefact(stage=..., ..., theoretical=theoretical, result=result)` →
+`write_r2_artefact(run_dir, artefact)`. The pre-bake chain's only
+remaining open seams are the concrete FK/IK backends (deliberately
+kept out of tree so the source / licensing decision is independent
+of the orchestrator wiring), the ROS-side
+`JointTrajectoryGoal → FollowJointTrajectory.Goal` and
+`EePayloadMessage → ur_sim_msgs/EePayload` materialisers (by design
+kept outside the pre-bake chain so they can import
+`trajectory_msgs` / `ur_sim_msgs` at test-run time), and M6.19
+payload-parametrisation of the R2 stage bodies (needs M6.16–M6.18
+to land first, which are gated on M6.0). M6.0 operator gate remains
+active for every bullet that touches the live sim._
+
+_Previous iteration: R2 **stage-3 cartesian gain resolver**
 landed as `tests/integration/r2_stage3_cartesian_gains.py` + 36 unit
 tests — Cartesian counterpart of the stage-1 gain resolver: closes the
 bringup-YAML → future stage-3 theoretical-response seam for the one
@@ -481,14 +561,20 @@ can import `trajectory_msgs` at test-run time.
 
 Still missing on the pre-bake chain:
 
-1. ~~R2 stage-3 cartesian gain resolver~~ — **landed this iteration** as
-   `r2_stage3_cartesian_gains.py` (see top-of-file summary). Future
-   stage-3 `crisp_cartesian_impedance` test bodies now resolve
-   per-axis Cartesian task stiffnesses in one call.
-2. The concrete FK **and** IK backends themselves — both adapters
+1. ~~R2 run-directory helper~~ — **landed this iteration** as
+   `r2_run_dir.py` (see top-of-file summary). R2 stage test bodies
+   now pick a canonical
+   `<repo>/evaluation/runs/r2__<UTC-ts>[__<suffix>]/` run directory
+   in one call that is byte-compatible with M5's
+   `find_latest_run_dir` lexicographic sort.
+2. ~~R2 stage-3 cartesian gain resolver~~ — landed previous iteration
+   as `r2_stage3_cartesian_gains.py`. Future stage-3
+   `crisp_cartesian_impedance` test bodies now resolve per-axis
+   Cartesian task stiffnesses in one call.
+3. The concrete FK **and** IK backends themselves — both adapters
    deliberately keep these out of tree so the source / licensing
    decision is independent of the orchestrator wiring.
-3. M6.19 payload parametrisation across R2 stages (needs M6.16–
+4. M6.19 payload parametrisation across R2 stages (needs M6.16–
    M6.18 to land first). The validator + MJCF emitter + MJCF
    splicer + stripper + EePayload message-shape builder landed so
    far are the preflight seams those bullets will plug into; the
@@ -496,11 +582,11 @@ Still missing on the pre-bake chain:
    the `ur_sim_msgs/EePayload` vs `geometry_msgs/Inertia +
    PoseStamped` decision (M6 R3 blocker #3) can still be made
    independently.
-4. A thin ROS-side `EePayloadMessage -> ur_sim_msgs/EePayload`
+5. A thin ROS-side `EePayloadMessage -> ur_sim_msgs/EePayload`
    materialiser — by design lives outside the pre-bake chain so
    it can import `ur_sim_msgs` (and decide whether to use
    `geometry_msgs/Inertia` instead) at test-run time.
-5. A cartesian stage-3 theoretical-response extension for
+6. A cartesian stage-3 theoretical-response extension for
    `cartesian_second_order` (would consume the stiffnesses this
    iteration's resolver returns). Deferred — stage-3 theoretical
    currently emits `tcp_trajectory_tracking` only, which suffices
@@ -510,7 +596,45 @@ Still missing on the pre-bake chain:
 
 ## Last completed tasks
 
-- **This iteration: R2 stage-3 cartesian gain resolver (closes the
+- **This iteration: R2 run-directory helper (closes the "caller
+  decides run_dir" seam the `r2_run_artefact` writer docstring
+  explicitly defers to).** Added `tests/integration/r2_run_dir.py`
+  exporting a single narrow function
+  `make_r2_run_dir(runs_root=None, *, clock=None, prefix="r2",
+  suffix=None, exist_ok=False) -> Path` plus pinned
+  `TS_FORMAT = "%Y%m%dT%H%M%SZ"`, `DEFAULT_PREFIX = "r2"`, and
+  `DEFAULT_RUNS_ROOT = <repo>/evaluation/runs`. The timestamp format
+  matches `evaluation/run_evaluation.py::make_run_dir` verbatim so
+  M5's `find_latest_run_dir` lexicographic sort keeps working
+  across R2 artefacts in the same `runs/` tree. Directory layout is
+  `<runs_root>/<prefix>__<UTC-ts>[__<suffix>]`; the optional
+  `suffix` disambiguates parallel R2 sweeps that would otherwise
+  collide in the same UTC second. `exist_ok=False` by default so
+  sub-second collisions surface as `FileExistsError`; `clock` is
+  injectable (`Callable[[], datetime]`) so unit tests pin the
+  timestamp without monkey-patching `datetime`. Validation:
+  `runs_root` must be `None` or `pathlib.Path` (str rejected — "one
+  canonical path type" across the pre-bake chain),
+  `prefix`/`suffix` must be non-empty `str` with no `/`, `\`, `__`,
+  or surrounding whitespace, `clock()` must return a UTC-aware
+  `datetime`. Pure stdlib; no PyYAML / numpy / ROS imports. Pinned
+  by 47 unit tests in `tests/unit/test_r2_run_dir.py`: export
+  surface (TS_FORMAT verbatim match, DEFAULT_PREFIX / DEFAULT_RUNS_ROOT);
+  happy-path matrix (default dir, custom prefix, suffix-after-ts,
+  prefix+suffix, None runs_root falls back to DEFAULT_RUNS_ROOT,
+  default clock within ±1s of wall-clock now); collision handling
+  (FileExistsError without `exist_ok`, same path with `exist_ok=True`);
+  lexicographic-sort invariant pinning the justification for M5's
+  `find_latest_run_dir`; full validation matrix (str/int runs_root,
+  empty/slash/backslash/`__`/leading-ws/trailing-ws prefix or
+  suffix, non-str prefix/suffix, non-callable clock, clock
+  returning non-datetime / naive / non-UTC, non-bool `exist_ok`);
+  and an end-to-end compose test feeding the returned path straight
+  into `r2_run_artefact.write_r2_artefact(...)` + `yaml.safe_load`.
+  Unit gate **1079 passed** (up from 1032). Full
+  `scripts/run_tests.sh` green end-to-end.
+
+- **Prior iteration: R2 stage-3 cartesian gain resolver (closes the
   bringup-controller-YAML → future stage-3 cartesian-response seam
   for `crisp_cartesian_impedance`).** Added
   `tests/integration/r2_stage3_cartesian_gains.py` exporting a single
